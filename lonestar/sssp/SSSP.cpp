@@ -271,6 +271,19 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
 }
 
+template<typename Map, typename R>
+void fillPredMap(Graph& graph, Map& pred, R& edgeRange) {
+    // Fill the pred array. This should be easily parallelizable.
+  for (auto vertex : graph) {
+    // std::cout << vertex << std::endl;
+    size_t incoming_edges = 0;
+    for (auto edge : edgeRange(vertex)) {
+      incoming_edges++;
+    }
+    pred.insert(std::pair<GNode, int>(vertex, incoming_edges));
+  }
+}
+
 template<typename T,
          typename Hash = std::hash<T>,
          typename KeyEqual = std::equal_to<T>>
@@ -307,15 +320,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   pushWrap(heap, source, 0);
 
   Map pred;
-  // Fill the pred array. This should be easily parallelizable.
-  for (auto vertex : graph) {
-    std::cout << vertex << std::endl;
-    size_t incoming_edges = 0;
-    for (auto edge : edgeRange(vertex)) {
-      incoming_edges++;
-    }
-    pred.insert(std::pair<GNode, int>(vertex, incoming_edges));
-  }
+  fillPredMap(graph, pred, edgeRange);
 
   // The set of nodes which have been fixed
   UnorderedSet<GNode> fixed;
@@ -351,25 +356,22 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
           for (auto e : edgeRange(z)) {
             inner_iter++;
             GNode k = graph.getEdgeDst(e);
-            // If k vertex is not fixed, process the edge
-            // between z and k.
+            // If k vertex is not fixed, process the edge between z and k.
             if (fixed.find(k) == fixed.end()) {
               auto& k_dist = graph.getData(k);
               auto& z_dist = graph.getData(z);
               auto z_k_dist = graph.getEdgeData(e);
-              // Process the edge. If the distance changed we need to remove
-              // the item from the heap if it was there. We'll reinsert below
-              // when we go through the q set.
-              if (processEdgeSP1(fixed, r_set, q_set, pred, k, z_k_dist, k_dist, z_dist)) {
-                T k_item(k, 0);
-                heap.remove(k_item);
-              }
+              // Process the edge.
+              processEdgeSP1(fixed, r_set, q_set, pred, k, z_k_dist, k_dist, z_dist);
             }
           }
         }
       }
       for (auto z : q_set) {
         if (fixed.find(z) == fixed.end()) {
+          // Need to remove the node from the heap before inserting.
+          T z_item(z, 0);
+          heap.remove(z_item);
           pushWrap(heap, z, graph.getData(z));
         }
       }
