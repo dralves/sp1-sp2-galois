@@ -271,8 +271,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
 }
 
-template<typename Map, typename R>
-void fillPredMap(Graph& graph, Map& pred, R& edgeRange) {
+template<typename PredMap, typename FixedMap, typename R>
+void fillMaps(Graph& graph, PredMap& pred, FixedMap& fixed, R& edgeRange) {
     // Fill the pred array. This should be easily parallelizable.
   for (auto vertex : graph) {
     // std::cout << vertex << std::endl;
@@ -280,7 +280,8 @@ void fillPredMap(Graph& graph, Map& pred, R& edgeRange) {
     for (auto edge : edgeRange(vertex)) {
       incoming_edges++;
     }
-    pred.insert(std::pair<GNode, int>(vertex, incoming_edges));
+    pred.insert(typename PredMap::value_type(vertex, incoming_edges));
+    fixed.insert(typename FixedMap::value_type(vertex, false));
   }
 }
 
@@ -289,8 +290,13 @@ template<typename T,
          typename KeyEqual = std::equal_to<T>>
 using UnorderedSet = std::unordered_set<T, Hash, KeyEqual, galois::runtime::Pow_2_BlockAllocator<T>>;
 
-template<typename Set, typename Map, typename EdgeDistData, typename GraphDistData>
-bool processEdgeSP1(Set& fixed, Set& r_set, Set& q_set, Map& pred, const GNode& k,
+template<typename FixedMap,
+         typename PredMap,
+         typename Set,
+         typename EdgeDistData,
+         typename GraphDistData>
+//__attribute__((noinline)) // helpful for profiling but makes things slower. comment to get a perf run
+bool processEdgeSP1(FixedMap& fixed, PredMap& pred, Set& r_set, Set& q_set, const GNode& k,
                     EdgeDistData& z_k_dist, GraphDistData& k_dist, GraphDistData& z_dist) {
   bool changed = false;
   pred[k] -= 1;
@@ -299,7 +305,7 @@ bool processEdgeSP1(Set& fixed, Set& r_set, Set& q_set, Map& pred, const GNode& 
     changed = true;
   }
   if (pred[k] == 0) {
-    fixed.insert(k);
+    fixed[k] = true;
     r_set.insert(k);
   } else if (changed) {
     q_set.insert(k);
@@ -312,18 +318,19 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
                 const R& edgeRange) {
 
   using Heap = galois::MinHeap<T>;
-  using Map = galois::flat_map<GNode, int>;
+  using PredMap = galois::flat_map<GNode, int>;
+  using FixedMap = galois::flat_map<GNode, bool>;
 
   Heap heap;
   // Se the dist in the graph to 0 and push to the heap.
   graph.getData(source) = 0;
   pushWrap(heap, source, 0);
 
-  Map pred;
-  fillPredMap(graph, pred, edgeRange);
-
+  PredMap pred;
   // The set of nodes which have been fixed
-  UnorderedSet<GNode> fixed;
+  FixedMap fixed;
+  fillMaps(graph, pred, fixed, edgeRange);
+
   // The set of nodes whose distance has changed (used in the inner loop)
   UnorderedSet<GNode> q_set;
   // The set of nodes which have been fixed but not explored
@@ -343,12 +350,13 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
       continue;
     }
 
+    auto& fixed_j = (*fixed.find(j.src)).second;
     // If the min element is not fixed
-    if (fixed.find(j.src) == fixed.end()) {
+    if (!fixed_j) {
       // Insert into R
       r_set.insert(j.src);
       // Set the element to fixed
-      fixed.insert(j.src);
+      fixed_j = true;
 
       // Inner loop
       // Go through the all the elements in R
@@ -362,19 +370,18 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
             inner_iter++;
             GNode k = graph.getEdgeDst(e);
             // If k vertex is not fixed, process the edge between z and k.
-            if (fixed.find(k) == fixed.end()) {
+            if (!(*fixed.find(k)).second) {
               auto& k_dist = graph.getData(k);
               auto& z_dist = graph.getData(z);
               auto z_k_dist = graph.getEdgeData(e);
               // Process the edge.
-              processEdgeSP1(fixed, r_set, q_set, pred, k, z_k_dist, k_dist, z_dist);
+              processEdgeSP1(fixed, pred, r_set, q_set, k, z_k_dist, k_dist, z_dist);
             }
           }
         }
       }
       for (auto z : q_set) {
-        if (fixed.find(z) == fixed.end()) {
-          // Need to remove the node from the heap before inserting.
+        if (!(*fixed.find(z)).second) {
           pushWrap(heap, z, graph.getData(z));
         }
       }
