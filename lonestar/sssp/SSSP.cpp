@@ -338,6 +338,11 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
     T j = heap.pop();
     outer_iter++;
 
+    if (graph.getData(j.src) < j.dist) {
+      // empty work
+      continue;
+    }
+
     // If the min element is not fixed
     if (fixed.find(j.src) == fixed.end()) {
       // Insert into R
@@ -370,8 +375,6 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
       for (auto z : q_set) {
         if (fixed.find(z) == fixed.end()) {
           // Need to remove the node from the heap before inserting.
-          T z_item(z, 0);
-          heap.remove(z_item);
           pushWrap(heap, z, graph.getData(z));
         }
       }
