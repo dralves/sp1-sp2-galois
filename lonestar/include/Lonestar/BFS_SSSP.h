@@ -45,6 +45,11 @@ struct BFS_SSSP {
       return left.dist == right.dist ? left.src < right.src
                                      : left.dist < right.dist;
     }
+
+    friend bool operator==(const UpdateRequest& left,
+                           const UpdateRequest& right) {
+      return left.src == right.src;
+    }
   };
 
   struct UpdateRequestIndexer {
