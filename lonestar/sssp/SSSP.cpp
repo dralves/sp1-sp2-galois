@@ -19,6 +19,7 @@
 
 #include "galois/Galois.h"
 #include "galois/AtomicHelpers.h"
+#include "galois/FlatMap.h"
 #include "galois/Reduction.h"
 #include "galois/PriorityQueue.h"
 #include "galois/Timer.h"
@@ -31,6 +32,7 @@
 #include "Lonestar/BFS_SSSP.h"
 
 #include <iostream>
+#include <unordered_set>
 
 namespace cll = llvm::cl;
 
@@ -64,12 +66,13 @@ enum Algo {
   dijkstraTile,
   dijkstra,
   topo,
-  topoTile
+  topoTile,
+  serSP1,
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep",    "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo",      "topoTile"};
+                                  "topo",      "topoTile", "serSP1"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -79,7 +82,8 @@ static cll::opt<Algo>
                      clEnumVal(serDelta, "serDelta"),
                      clEnumVal(dijkstraTile, "dijkstraTile"),
                      clEnumVal(dijkstra, "dijkstra"), clEnumVal(topo, "topo"),
-                     clEnumVal(topoTile, "topoTile"), clEnumValEnd),
+                     clEnumVal(topoTile, "topoTile"),
+                     clEnumVal(serSP1, "serSP1"), clEnumValEnd),
          cll::init(deltaTile));
 
 // typedef galois::graphs::LC_InlineEdge_Graph<std::atomic<unsigned int>,
@@ -267,6 +271,116 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
 }
 
+template<typename T,
+         typename Hash = std::hash<T>,
+         typename KeyEqual = std::equal_to<T>>
+using UnorderedSet = std::unordered_set<T, Hash, KeyEqual, galois::runtime::Pow_2_BlockAllocator<T>>;
+
+template<typename Set, typename Map, typename EdgeDistData, typename GraphDistData>
+bool processEdgeSP1(Set& fixed, Set& r_set, Set& q_set, Map& pred, const GNode& k,
+                    EdgeDistData& z_k_dist, GraphDistData& k_dist, GraphDistData& z_dist) {
+  bool changed = false;
+  pred[k] -= 1;
+  if (k_dist > z_dist + z_k_dist) {
+    k_dist = z_dist + z_k_dist;
+    changed = true;
+  }
+  if (pred[k] == 0) {
+    fixed.insert(k);
+    r_set.insert(k);
+  } else if (changed) {
+    q_set.insert(k);
+  }
+  return changed;
+}
+
+template <typename T, typename P, typename R>
+void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
+                const R& edgeRange) {
+
+  using Heap = galois::MinHeap<T>;
+  using Map = galois::flat_map<GNode, int>;
+
+  Heap heap;
+  // Se the dist in the graph to 0 and push to the heap.
+  graph.getData(source) = 0;
+  pushWrap(heap, source, 0);
+
+  Map pred;
+  // Fill the pred array. This should be easily parallelizable.
+  for (auto vertex : graph) {
+    std::cout << vertex << std::endl;
+    size_t incoming_edges = 0;
+    for (auto edge : edgeRange(vertex)) {
+      incoming_edges++;
+    }
+    pred.insert(std::pair<GNode, int>(vertex, incoming_edges));
+  }
+
+  // The set of nodes which have been fixed
+  UnorderedSet<GNode> fixed;
+  // The set of nodes whose distance has changed (used in the inner loop)
+  UnorderedSet<GNode> q_set;
+  // The set of nodes which have been fixed but not explored
+  UnorderedSet<GNode> r_set;
+
+  size_t outer_iter = 0;
+  size_t inner_iter = 0;
+
+  // While the heap is not empty
+  while (!heap.empty()) {
+    // Get the min element from the heap.
+    T j = heap.pop();
+    outer_iter++;
+
+    // If the min element is not fixed
+    if (fixed.find(j.src) == fixed.end()) {
+      // Insert into R
+      r_set.insert(j.src);
+      // Set the element to fixed
+      fixed.insert(j.src);
+
+      // Inner loop
+      // Go through the all the elements in R
+      while (!r_set.empty()) {
+        for (auto it = r_set.begin(); it != r_set.end();) {
+          GNode z = *it;
+          // Remove one element
+          it = r_set.erase(it);
+          // Get all the vertices that have edges to z
+          for (auto e : edgeRange(z)) {
+            inner_iter++;
+            GNode k = graph.getEdgeDst(e);
+            // If k vertex is not fixed, process the edge
+            // between z and k.
+            if (fixed.find(k) == fixed.end()) {
+              auto& k_dist = graph.getData(k);
+              auto& z_dist = graph.getData(z);
+              auto z_k_dist = graph.getEdgeData(e);
+              // Process the edge. If the distance changed we need to remove
+              // the item from the heap if it was there. We'll reinsert below
+              // when we go through the q set.
+              if (processEdgeSP1(fixed, r_set, q_set, pred, k, z_k_dist, k_dist, z_dist)) {
+                T k_item(k, 0);
+                heap.remove(k_item);
+              }
+            }
+          }
+        }
+      }
+      for (auto z : q_set) {
+        if (fixed.find(z) == fixed.end()) {
+          pushWrap(heap, z, graph.getData(z));
+        }
+      }
+      q_set.clear();
+    }
+  }
+
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Outer loop iterations", outer_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Inner loop iterations", inner_iter);
+}
+
 void topoAlgo(Graph& graph, const GNode& source) {
 
   galois::LargeArray<Dist> oldDist;
@@ -438,6 +552,10 @@ int main(int argc, char** argv) {
     break;
   case topoTile:
     topoTileAlgo(graph, source);
+    break;
+  case serSP1:
+    serSP1Algo<UpdateRequest>(graph, source, ReqPushWrap(),
+                              OutEdgeRangeFn{graph});
     break;
   default:
     std::abort();
