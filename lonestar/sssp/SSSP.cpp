@@ -271,8 +271,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
 }
 
-template<typename PredMap, typename FixedMap, typename R>
-void fillMaps(Graph& graph, PredMap& pred, FixedMap& fixed, R& edgeRange) {
+template<typename Pred, typename R>
+void initSP1(Graph& graph, Pred& pred, R& edgeRange) {
     // Fill the pred array. This should be easily parallelizable.
   for (auto vertex : graph) {
     // std::cout << vertex << std::endl;
@@ -280,8 +280,7 @@ void fillMaps(Graph& graph, PredMap& pred, FixedMap& fixed, R& edgeRange) {
     for (auto edge : edgeRange(vertex)) {
       incoming_edges++;
     }
-    pred.insert(typename PredMap::value_type(vertex, incoming_edges));
-    fixed.insert(typename FixedMap::value_type(vertex, false));
+    pred[vertex] = incoming_edges;
   }
 }
 
@@ -290,13 +289,13 @@ template<typename T,
          typename KeyEqual = std::equal_to<T>>
 using UnorderedSet = std::unordered_set<T, Hash, KeyEqual, galois::runtime::Pow_2_BlockAllocator<T>>;
 
-template<typename FixedMap,
-         typename PredMap,
+template<typename Fixed,
+         typename Pred,
          typename Set,
          typename EdgeDistData,
          typename GraphDistData>
 //__attribute__((noinline)) // helpful for profiling but makes things slower. comment to get a perf run
-bool processEdgeSP1(FixedMap& fixed, PredMap& pred, Set& r_set, Set& q_set, const GNode& k,
+bool processEdgeSP1(Fixed& fixed, Pred& pred, Set& r_set, Set& q_set, const GNode& k,
                     EdgeDistData& z_k_dist, GraphDistData& k_dist, GraphDistData& z_dist) {
   bool changed = false;
   pred[k] -= 1;
@@ -318,18 +317,18 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
                 const R& edgeRange) {
 
   using Heap = galois::MinHeap<T>;
-  using PredMap = galois::flat_map<GNode, int>;
-  using FixedMap = galois::flat_map<GNode, bool>;
+  using Pred = std::vector<int>;
+  using Fixed = std::vector<bool>;
 
   Heap heap;
   // Se the dist in the graph to 0 and push to the heap.
   graph.getData(source) = 0;
   pushWrap(heap, source, 0);
 
-  PredMap pred;
+  Pred pred(graph.size(), 0);
   // The set of nodes which have been fixed
-  FixedMap fixed;
-  fillMaps(graph, pred, fixed, edgeRange);
+  Fixed fixed(graph.size(), false);
+  initSP1(graph, pred, edgeRange);
 
   // The set of nodes whose distance has changed (used in the inner loop)
   UnorderedSet<GNode> q_set;
@@ -350,13 +349,12 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
       continue;
     }
 
-    auto& fixed_j = (*fixed.find(j.src)).second;
     // If the min element is not fixed
-    if (!fixed_j) {
+    if (!fixed[j.src]) {
       // Insert into R
       r_set.insert(j.src);
       // Set the element to fixed
-      fixed_j = true;
+      fixed[j.src] = true;
 
       // Inner loop
       // Go through the all the elements in R
@@ -370,7 +368,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
             inner_iter++;
             GNode k = graph.getEdgeDst(e);
             // If k vertex is not fixed, process the edge between z and k.
-            if (!(*fixed.find(k)).second) {
+            if (!fixed[k]) {
               auto& k_dist = graph.getData(k);
               auto& z_dist = graph.getData(z);
               auto z_k_dist = graph.getEdgeData(e);
@@ -381,7 +379,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
         }
       }
       for (auto z : q_set) {
-        if (!(*fixed.find(z)).second) {
+        if (!fixed[z]) {
           pushWrap(heap, z, graph.getData(z));
         }
       }
