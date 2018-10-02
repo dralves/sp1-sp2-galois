@@ -272,10 +272,10 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 }
 
 template<typename Pred, typename R>
-void initSP1(Graph& graph, Pred& pred, R& edgeRange) {
-  // Fill the pred array. This should be easily parallelizable.
+void initPred(Graph& graph, Pred& pred, R& edgeRange) {
+  // Fill the pred array
   for (auto vertex : graph) {
-    for (auto edge : edgeRange(vertex)) {
+   for (auto edge : edgeRange(vertex)) {
       pred[graph.getEdgeDst(edge)]++;
     }
   }
@@ -300,6 +300,7 @@ bool processEdgeSP1(Fixed& fixed, Pred& pred, Set& r_set, Set& q_set, const GNod
     k_dist = z_dist + z_k_dist;
     changed = true;
   }
+
   if (pred[k] == 0) {
     fixed[k] = true;
     r_set.insert(k);
@@ -309,23 +310,15 @@ bool processEdgeSP1(Fixed& fixed, Pred& pred, Set& r_set, Set& q_set, const GNod
   return changed;
 }
 
-template <typename T, typename P, typename R>
-void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
-                const R& edgeRange) {
+template <typename T, typename Pred, typename Fixed, typename P, typename R>
+void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
+                const P& pushWrap, const R& edgeRange) {
 
   using Heap = galois::MinHeap<T>;
-  using Pred = std::vector<int>;
-  using Fixed = std::vector<bool>;
 
   Heap heap;
-  // Se the dist in the graph to 0 and push to the heap.
-  graph.getData(source) = 0;
   pushWrap(heap, source, 0);
 
-  Pred pred(graph.size(), 0);
-  // The set of nodes which have been fixed
-  Fixed fixed(graph.size(), false);
-  initSP1(graph, pred, edgeRange);
 
   // The set of nodes whose distance has changed (used in the inner loop)
   UnorderedSet<GNode> q_set;
@@ -525,44 +518,59 @@ int main(int argc, char** argv) {
   graph.getData(source) = 0;
 
   std::cout << "Running " << ALGO_NAMES[algo] << " algorithm" << std::endl;
-
   galois::StatTimer Tmain;
-  Tmain.start();
 
   switch (algo) {
   case deltaTile:
+    Tmain.start();
     deltaStepAlgo<SrcEdgeTile>(graph, source, SrcEdgeTilePushWrap{graph},
                                TileRangeFn());
     break;
   case deltaStep:
+    Tmain.start();
     deltaStepAlgo<UpdateRequest>(graph, source, ReqPushWrap(),
                                  OutEdgeRangeFn{graph});
     break;
   case serDeltaTile:
+    Tmain.start();
     serDeltaAlgo<SrcEdgeTile>(graph, source, SrcEdgeTilePushWrap{graph},
                               TileRangeFn());
     break;
   case serDelta:
+    Tmain.start();
     serDeltaAlgo<UpdateRequest>(graph, source, ReqPushWrap(),
                                 OutEdgeRangeFn{graph});
     break;
   case dijkstraTile:
+    Tmain.start();
     dijkstraAlgo<SrcEdgeTile>(graph, source, SrcEdgeTilePushWrap{graph},
                               TileRangeFn());
     break;
   case dijkstra:
+    Tmain.start();
     dijkstraAlgo<UpdateRequest>(graph, source, ReqPushWrap(),
                                 OutEdgeRangeFn{graph});
     break;
   case topo:
+    Tmain.start();
     topoAlgo(graph, source);
     break;
   case topoTile:
+    Tmain.start();
     topoTileAlgo(graph, source);
     break;
   case serSP1:
-    serSP1Algo<UpdateRequest>(graph, source, ReqPushWrap(),
-                              OutEdgeRangeFn{graph});
+    using Pred = std::vector<int>;
+    using Fixed = std::vector<bool>;
+
+    auto edgeRange = OutEdgeRangeFn{graph};
+
+    Pred pred(graph.size(), 0);
+    Fixed fixed(graph.size(), false);
+    initPred(graph, pred, edgeRange);
+
+    Tmain.start();
+    serSP1Algo<UpdateRequest>(graph, source, pred, fixed, ReqPushWrap(), edgeRange);
     break;
   default:
     std::abort();
