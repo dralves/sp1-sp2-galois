@@ -273,14 +273,11 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
 template<typename Pred, typename R>
 void initSP1(Graph& graph, Pred& pred, R& edgeRange) {
-    // Fill the pred array. This should be easily parallelizable.
+  // Fill the pred array. This should be easily parallelizable.
   for (auto vertex : graph) {
-    // std::cout << vertex << std::endl;
-    size_t incoming_edges = 0;
     for (auto edge : edgeRange(vertex)) {
-      incoming_edges++;
+      pred[graph.getEdgeDst(edge)]++;
     }
-    pred[vertex] = incoming_edges;
   }
 }
 
