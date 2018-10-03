@@ -103,8 +103,9 @@ struct NodeData {
   int pred;
   bool fixed;
   bool in_heap;
+  uint32_t heap_dist;
   GNode node;
-  NodeData(): dist(0), pred(0), fixed(false), in_heap(false), node(-1) {}
+  NodeData(): dist(0), pred(0), fixed(false), in_heap(false), heap_dist(0), node(-1) {}
 };
 
 constexpr static const bool TRACK_WORK          = false;
@@ -259,6 +260,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   size_t inner_iter = 0;
   size_t heap_pushes =0;
   double average_heap_size = 0;
+  size_t duplicated_items = 0;
 
   while (!wl.empty()) {
     ++iter;
@@ -267,7 +269,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
     T item = wl.pop();
 
     if (graph.getData(item.src).dist < item.dist) {
-      // empty work
+      duplicated_items++;
       continue;
     }
 
@@ -290,6 +292,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Inner iteration", inner_iter);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Heap pushes", heap_pushes);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
 }
 
@@ -324,6 +327,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   size_t average_heap_size = 0;
   size_t average_rset_size = 0;
   size_t duplicated_items = 0;
+  size_t duplicates_avoided = 0;
 
   // While the heap is not empty
   while (!heap.empty()) {
@@ -335,7 +339,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
     auto& j_data = graph.getData(j.src);
 
     if (j_data.dist < j.dist) {
-      // empty work
+      duplicated_items++;
       continue;
     }
 
@@ -357,22 +361,19 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
           if (!k_data.fixed) {
             auto z_k_dist = graph.getEdgeData(e);
             k_data.pred--;
-
-            bool changed = false;
-            if (k_data.dist > z_data.dist + z_k_dist) {
-              k_data.dist = z_data.dist + z_k_dist;
-              changed = true;
-            }
             if (k_data.pred <= 0) {
               k_data.fixed = true;
               r_set.push_back(k);
-            } else if (changed) {
-              q_set.push_back(&k_data);
+            }
+
+            if (k_data.dist > z_data.dist + z_k_dist) {
+              k_data.dist = z_data.dist + z_k_dist;
+              if (!k_data.fixed) q_set.push_back(&k_data);
             }
           }
         }
 
-        average_rset_size += r_set.size() + 1;
+        average_rset_size += r_set.size();
         middle_iter++;
 
         if (r_set.empty()) break;
@@ -384,10 +385,14 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
       for (auto& z : q_set) {
         auto& z_data = *z;
         if (!z_data.fixed) {
+          if (z_data.in_heap && z_data.heap_dist <= z_data.dist) {
+            duplicates_avoided++;
+            continue;
+          }
+          z_data.in_heap = true;
+          z_data.heap_dist = z_data.dist;
           heap_pushes++;
           pushWrap(heap, z_data.node, z_data.dist);
-        } else {
-          duplicated_items++;
         }
       }
       q_set.clear();
@@ -397,7 +402,8 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-serSP1", "Outer loop iterations", outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Inner loop iterations", inner_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes avoided", duplicated_items);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes avoided", duplicates_avoided);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Additional nodes explored", additional_nodes_explored);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
