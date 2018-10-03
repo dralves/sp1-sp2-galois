@@ -87,13 +87,25 @@ static cll::opt<Algo>
                      clEnumVal(serSP1, "serSP1"), clEnumValEnd),
          cll::init(deltaTile));
 
+struct NodeData;
+
 // typedef galois::graphs::LC_InlineEdge_Graph<std::atomic<unsigned int>,
 // uint32_t>::with_no_lockable<true>::type::with_numa_alloc<true>::type Graph;
 //! [withnumaalloc]
-using Graph = galois::graphs::LC_CSR_Graph<std::atomic<uint32_t>, uint32_t>::
+using Graph = galois::graphs::LC_CSR_Graph<NodeData, uint32_t>::
     with_no_lockable<true>::type ::with_numa_alloc<true>::type;
 //! [withnumaalloc]
+
 typedef Graph::GraphNode GNode;
+
+struct NodeData {
+  std::atomic<uint32_t> dist;
+  int pred;
+  bool fixed;
+  bool in_heap;
+  GNode node;
+  NodeData(): dist(0), pred(0), fixed(false), in_heap(false), node(-1) {}
+};
 
 constexpr static const bool TRACK_WORK          = false;
 constexpr static const unsigned CHUNK_SIZE      = 64u;
@@ -124,7 +136,7 @@ void deltaStepAlgo(Graph& graph, GNode source, const P& pushWrap,
   using PSchunk = gwl::PerSocketChunkFIFO<CHUNK_SIZE>;
   using OBIM    = gwl::OrderedByIntegerMetric<UpdateRequestIndexer, PSchunk>;
 
-  graph.getData(source) = 0;
+  graph.getData(source).dist = 0;
 
   galois::InsertBag<T> initBag;
   pushWrap(initBag, source, 0, "parallel");
@@ -135,7 +147,7 @@ void deltaStepAlgo(Graph& graph, GNode source, const P& pushWrap,
                          galois::MethodFlag::UNPROTECTED;
                      const auto& sdata = graph.getData(item.src, flag);
 
-                     if (sdata < item.dist) {
+                     if (sdata.dist < item.dist) {
                        if (TRACK_WORK)
                          WLEmptyWork += 1;
                        return;
@@ -146,16 +158,16 @@ void deltaStepAlgo(Graph& graph, GNode source, const P& pushWrap,
                        GNode dst          = graph.getEdgeDst(ii);
                        auto& ddist        = graph.getData(dst, flag);
                        Dist ew            = graph.getEdgeData(ii, flag);
-                       const Dist newDist = sdata + ew;
+                       const Dist newDist = sdata.dist + ew;
 
                        while (true) {
-                         Dist oldDist = ddist;
+                         Dist oldDist = ddist.dist;
 
                          if (oldDist <= newDist) {
                            break;
                          }
 
-                         if (ddist.compare_exchange_weak(
+                         if (ddist.dist.compare_exchange_weak(
                                  oldDist, newDist, std::memory_order_relaxed)) {
 
                            if (TRACK_WORK) {
@@ -190,7 +202,7 @@ void serDeltaAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
   SerialBucketWL<T, UpdateRequestIndexer> wl(UpdateRequestIndexer{stepShift});
   ;
-  graph.getData(source) = 0;
+  graph.getData(source).dist = 0;
 
   pushWrap(wl, source, 0);
 
@@ -204,7 +216,7 @@ void serDeltaAlgo(Graph& graph, const GNode& source, const P& pushWrap,
       auto item = curr.front();
       curr.pop_front();
 
-      if (graph.getData(item.src) < item.dist) {
+      if (graph.getData(item.src).dist < item.dist) {
         // empty work
         continue;
       }
@@ -216,8 +228,8 @@ void serDeltaAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
         const auto newDist = item.dist + graph.getEdgeData(e);
 
-        if (newDist < ddata) {
-          ddata = newDist;
+        if (newDist < ddata.dist) {
+          ddata.dist = newDist;
           pushWrap(wl, dst, newDist);
         }
       }
@@ -238,7 +250,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
   using WL = galois::MinHeap<T>;
 
-  graph.getData(source) = 0;
+  graph.getData(source).dist = 0;
 
   WL wl;
   pushWrap(wl, source, 0);
@@ -254,7 +266,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
     T item = wl.pop();
 
-    if (graph.getData(item.src) < item.dist) {
+    if (graph.getData(item.src).dist < item.dist) {
       // empty work
       continue;
     }
@@ -267,8 +279,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
       const auto newDist = item.dist + graph.getEdgeData(e);
 
-      if (newDist < ddata) {
-        ddata = newDist;
+      if (newDist < ddata.dist) {
+        ddata.dist = newDist;
         pushWrap(wl, dst, newDist);
         heap_pushes++;
       }
@@ -281,19 +293,19 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
 }
 
-template<typename Pred, typename R>
-void initPred(Graph& graph, Pred& pred, R& edgeRange) {
+template<typename R>
+void initGraph(Graph& graph, R& edgeRange) {
   // Fill the pred array
   for (auto vertex : graph) {
-   for (auto edge : edgeRange(vertex)) {
-      pred[graph.getEdgeDst(edge)]++;
+    for (auto edge : edgeRange(vertex)) {
+      graph.getData(graph.getEdgeDst(edge)).pred++;
     }
   }
 }
 
-template <typename T, typename Pred, typename Fixed, typename P, typename R>
-void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
-                const P& pushWrap, const R& edgeRange) {
+template <typename T, typename P, typename R>
+void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
+                const R& edgeRange) {
 
   using Heap = galois::MinHeap<T>;
 
@@ -302,7 +314,7 @@ void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
 
   // The set of nodes which have been fixed but not explored
   galois::gstl::Vector<GNode> r_set;
-  galois::gstl::Vector<T> q_set;
+  galois::gstl::Vector<NodeData*> q_set;
 
   size_t outer_iter = 0;
   size_t middle_iter = 0;
@@ -320,39 +332,42 @@ void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
     T j = heap.pop();
     outer_iter++;
 
-    if (graph.getData(j.src) < j.dist) {
+    auto& j_data = graph.getData(j.src);
+
+    if (j_data.dist < j.dist) {
       // empty work
       continue;
     }
 
     // If the min element is not fixed
-    if (!fixed[j.src]) {
+    if (!j_data.fixed) {
       // Set the element to fixed
-      fixed[j.src] = true;
+      j_data.fixed = true;
       GNode z = j.src;
 
       // Inner loop, go through the all the elements in R
       do {
+        auto& z_data = graph.getData(z);
         // Get all the vertices that have edges from z
         for (auto e : edgeRange(z)) {
           inner_iter++;
           GNode k = graph.getEdgeDst(e);
+          auto& k_data = graph.getData(k);
           // If k vertex is not fixed, process the edge between z and k.
-          if (!fixed[k]) {
-            auto& k_dist = graph.getData(k);
-            auto z_dist = graph.getData(z).load();
+          if (!k_data.fixed) {
             auto z_k_dist = graph.getEdgeData(e);
-            pred[k] = pred[k] - 1;
+            k_data.pred--;
+
             bool changed = false;
-            if (k_dist > z_dist + z_k_dist) {
-              k_dist = z_dist + z_k_dist;
+            if (k_data.dist > z_data.dist + z_k_dist) {
+              k_data.dist = z_data.dist + z_k_dist;
               changed = true;
             }
-            if (pred[k] == 0) {
-              fixed[k] = true;
+            if (k_data.pred <= 0) {
+              k_data.fixed = true;
               r_set.push_back(k);
             } else if (changed) {
-              q_set.emplace_back(k, k_dist);
+              q_set.push_back(&k_data);
             }
           }
         }
@@ -366,10 +381,11 @@ void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
         additional_nodes_explored++;
       } while (true);
 
-      for (auto& item : q_set) {
-        if (!fixed[item.src] && item.dist == graph.getData(item.src).load()) {
+      for (auto& z : q_set) {
+        auto& z_data = *z;
+        if (!z_data.fixed) {
           heap_pushes++;
-          pushWrap(heap, item.src, item.dist);
+          pushWrap(heap, z_data.node, z_data.dist);
         } else {
           duplicated_items++;
         }
@@ -397,7 +413,7 @@ void topoAlgo(Graph& graph, const GNode& source) {
                  [&](size_t i) { oldDist.constructAt(i, INFTY); },
                  galois::no_stats(), galois::loopname("initDistArray"));
 
-  graph.getData(source) = 0;
+  graph.getData(source).dist = 0;
 
   galois::GReduceLogicalOR changed;
   size_t rounds = 0;
@@ -411,16 +427,16 @@ void topoAlgo(Graph& graph, const GNode& source) {
                    [&](const GNode& n) {
                      const auto& sdata = graph.getData(n);
 
-                     if (oldDist[n] > sdata) {
+                     if (oldDist[n] > sdata.dist) {
 
-                       oldDist[n] = sdata;
+                       oldDist[n] = sdata.dist;
                        changed.update(true);
 
                        for (auto e : graph.edges(n)) {
-                         const auto newDist = sdata + graph.getEdgeData(e);
+                         const auto newDist = sdata.dist + graph.getEdgeData(e);
                          auto dst           = graph.getEdgeDst(e);
                          auto& ddata        = graph.getData(dst);
-                         galois::atomicMin(ddata, newDist);
+                         galois::atomicMin(ddata.dist, newDist);
                        }
                      }
                    },
@@ -435,7 +451,7 @@ void topoTileAlgo(Graph& graph, const GNode& source) {
 
   galois::InsertBag<SrcEdgeTile> tiles;
 
-  graph.getData(source) = 0;
+  graph.getData(source).dist = 0;
 
   galois::do_all(galois::iterate(graph),
                  [&](const GNode& n) {
@@ -456,16 +472,16 @@ void topoTileAlgo(Graph& graph, const GNode& source) {
                    [&](SrcEdgeTile& t) {
                      const auto& sdata = graph.getData(t.src);
 
-                     if (t.dist > sdata) {
+                     if (t.dist > sdata.dist) {
 
-                       t.dist = sdata;
+                       t.dist = sdata.dist;
                        changed.update(true);
 
                        for (auto e = t.beg; e != t.end; ++e) {
-                         const auto newDist = sdata + graph.getEdgeData(e);
+                         const auto newDist = sdata.dist + graph.getEdgeData(e);
                          auto dst           = graph.getEdgeDst(e);
                          auto& ddata        = graph.getData(dst);
-                         galois::atomicMin(ddata, newDist);
+                         galois::atomicMin(ddata.dist, newDist);
                        }
                      }
                    },
@@ -519,9 +535,13 @@ int main(int argc, char** argv) {
   }
 
   galois::do_all(galois::iterate(graph),
-                 [&graph](GNode n) { graph.getData(n) = SSSP::DIST_INFINITY; });
+                 [&graph](GNode n) {
+                   auto& data = graph.getData(n);
+                   data.dist = SSSP::DIST_INFINITY;
+                   data.node = n;
+                 });
 
-  graph.getData(source) = 0;
+  graph.getData(source).dist = 0;
 
   std::cout << "Running " << ALGO_NAMES[algo] << " algorithm" << std::endl;
   galois::StatTimer Tmain;
@@ -566,17 +586,11 @@ int main(int argc, char** argv) {
     topoTileAlgo(graph, source);
     break;
     case serSP1: {
-      using Pred = std::vector<int>;
-      using Fixed = std::vector<bool>;
-
       auto edgeRange = OutEdgeRangeFn{graph};
-
-      Pred pred(graph.size(), 0);
-      Fixed fixed(graph.size(), false);
-      initPred(graph, pred, edgeRange);
+      initGraph(graph, edgeRange);
 
       Tmain.start();
-      serSP1Algo<UpdateRequest>(graph, source, pred, fixed, ReqPushWrap(), edgeRange);
+      serSP1Algo<UpdateRequest>(graph, source, ReqPushWrap(), edgeRange);
       break;
     }
   default:
@@ -588,7 +602,7 @@ int main(int argc, char** argv) {
   galois::reportPageAlloc("MeminfoPost");
 
   std::cout << "Node " << reportNode << " has distance "
-            << graph.getData(report) << "\n";
+            << graph.getData(report).dist << "\n";
 
   if (!skipVerify) {
     if (SSSP::verify(graph, source)) {

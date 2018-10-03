@@ -200,13 +200,13 @@ struct BFS_SSSP {
     }
 
     void operator()(typename Graph::GraphNode node) const {
-      Dist sd = g.getData(node);
+      Dist sd = g.getData(node).dist;
       if (sd == DIST_INFINITY)
         return;
 
       for (auto ii : g.edges(node)) {
         auto dst = g.getEdgeDst(ii);
-        Dist dd  = g.getData(dst);
+        Dist dd  = g.getData(dst).dist;
         Dist ew  = getEdgeWeight<USE_EDGE_WT>(ii);
         if (dd > sd + ew) {
           std::cout << "Wrong label: " << dd << ", on node: " << dst
@@ -226,7 +226,7 @@ struct BFS_SSSP {
     max_dist(Graph& g, galois::GReduceMax<Dist>& m) : g(g), m(m) {}
 
     void operator()(typename Graph::GraphNode node) const {
-      Dist d = g.getData(node);
+      Dist d = g.getData(node).dist;
       if (d == DIST_INFINITY)
         return;
       m.update(d);
@@ -234,15 +234,15 @@ struct BFS_SSSP {
   };
 
   static bool verify(Graph& graph, GNode source) {
-    if (graph.getData(source) != 0) {
+    if (graph.getData(source).dist != 0) {
       std::cerr << "ERROR: source has non-zero dist value == "
-                << graph.getData(source) << std::endl;
+                << graph.getData(source).dist << std::endl;
       return false;
     }
 
     std::atomic<size_t> notVisited(0);
     galois::do_all(galois::iterate(graph), [&notVisited, &graph](GNode node) {
-      if (graph.getData(node) >= DIST_INFINITY)
+      if (graph.getData(node).dist >= DIST_INFINITY)
         ++notVisited;
     });
 
