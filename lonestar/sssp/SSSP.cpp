@@ -23,6 +23,7 @@
 #include "galois/Reduction.h"
 #include "galois/PriorityQueue.h"
 #include "galois/Timer.h"
+#include "galois/gstl.h"
 #include "galois/Timer.h"
 #include "galois/graphs/LCGraph.h"
 #include "galois/graphs/TypeTraits.h"
@@ -243,9 +244,13 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   pushWrap(wl, source, 0);
 
   size_t iter = 0;
+  size_t inner_iter = 0;
+  size_t heap_pushes =0;
+  double average_heap_size = 0;
 
   while (!wl.empty()) {
     ++iter;
+    average_heap_size += wl.size();
 
     T item = wl.pop();
 
@@ -256,6 +261,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
     for (auto e : edgeRange(item)) {
 
+      inner_iter++;
       GNode dst   = graph.getEdgeDst(e);
       auto& ddata = graph.getData(dst);
 
@@ -264,11 +270,15 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
       if (newDist < ddata) {
         ddata = newDist;
         pushWrap(wl, dst, newDist);
+        heap_pushes++;
       }
     }
   }
 
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
+  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Inner iteration", inner_iter);
+  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Heap pushes", heap_pushes);
+  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
 }
 
 template<typename Pred, typename R>
@@ -281,35 +291,6 @@ void initPred(Graph& graph, Pred& pred, R& edgeRange) {
   }
 }
 
-template<typename T,
-         typename Hash = std::hash<T>,
-         typename KeyEqual = std::equal_to<T>>
-using UnorderedSet = std::unordered_set<T, Hash, KeyEqual, galois::runtime::Pow_2_BlockAllocator<T>>;
-
-template<typename Fixed,
-         typename Pred,
-         typename Set,
-         typename EdgeDistData,
-         typename GraphDistData>
-//__attribute__((noinline)) // helpful for profiling but makes things slower. comment to get a perf run
-bool processEdgeSP1(Fixed& fixed, Pred& pred, Set& r_set, Set& q_set, const GNode& k,
-                    EdgeDistData& z_k_dist, GraphDistData& k_dist, GraphDistData& z_dist) {
-  bool changed = false;
-  pred[k] -= 1;
-  if (k_dist > z_dist + z_k_dist) {
-    k_dist = z_dist + z_k_dist;
-    changed = true;
-  }
-
-  if (pred[k] == 0) {
-    fixed[k] = true;
-    r_set.insert(k);
-  } else if (changed) {
-    q_set.insert(k);
-  }
-  return changed;
-}
-
 template <typename T, typename Pred, typename Fixed, typename P, typename R>
 void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
                 const P& pushWrap, const R& edgeRange) {
@@ -319,17 +300,22 @@ void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
   Heap heap;
   pushWrap(heap, source, 0);
 
-
-  // The set of nodes whose distance has changed (used in the inner loop)
-  UnorderedSet<GNode> q_set;
   // The set of nodes which have been fixed but not explored
-  UnorderedSet<GNode> r_set;
+  galois::gstl::Vector<GNode> r_set;
+  galois::gstl::Vector<T> q_set;
 
   size_t outer_iter = 0;
+  size_t middle_iter = 0;
+  size_t additional_nodes_explored = 0;
   size_t inner_iter = 0;
+  size_t heap_pushes = 0;
+  size_t average_heap_size = 0;
+  size_t average_rset_size = 0;
+  size_t duplicated_items = 0;
 
   // While the heap is not empty
   while (!heap.empty()) {
+    average_heap_size += heap.size();
     // Get the min element from the heap.
     T j = heap.pop();
     outer_iter++;
@@ -341,36 +327,51 @@ void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
 
     // If the min element is not fixed
     if (!fixed[j.src]) {
-      // Insert into R
-      r_set.insert(j.src);
       // Set the element to fixed
       fixed[j.src] = true;
+      GNode z = j.src;
 
-      // Inner loop
-      // Go through the all the elements in R
-      while (!r_set.empty()) {
-        for (auto it = r_set.begin(); it != r_set.end();) {
-          GNode z = *it;
-          // Remove one element
-          it = r_set.erase(it);
-          // Get all the vertices that have edges to z
-          for (auto e : edgeRange(z)) {
-            inner_iter++;
-            GNode k = graph.getEdgeDst(e);
-            // If k vertex is not fixed, process the edge between z and k.
-            if (!fixed[k]) {
-              auto& k_dist = graph.getData(k);
-              auto& z_dist = graph.getData(z);
-              auto z_k_dist = graph.getEdgeData(e);
-              // Process the edge.
-              processEdgeSP1(fixed, pred, r_set, q_set, k, z_k_dist, k_dist, z_dist);
+      // Inner loop, go through the all the elements in R
+      do {
+        // Get all the vertices that have edges from z
+        for (auto e : edgeRange(z)) {
+          inner_iter++;
+          GNode k = graph.getEdgeDst(e);
+          // If k vertex is not fixed, process the edge between z and k.
+          if (!fixed[k]) {
+            auto& k_dist = graph.getData(k);
+            auto z_dist = graph.getData(z).load();
+            auto z_k_dist = graph.getEdgeData(e);
+            pred[k] = pred[k] - 1;
+            bool changed = false;
+            if (k_dist > z_dist + z_k_dist) {
+              k_dist = z_dist + z_k_dist;
+              changed = true;
+            }
+            if (pred[k] == 0) {
+              fixed[k] = true;
+              r_set.push_back(k);
+            } else if (changed) {
+              q_set.emplace_back(k, k_dist);
             }
           }
         }
-      }
-      for (auto z : q_set) {
-        if (!fixed[z]) {
-          pushWrap(heap, z, graph.getData(z));
+
+        average_rset_size += r_set.size() + 1;
+        middle_iter++;
+
+        if (r_set.empty()) break;
+        z = r_set.back();
+        r_set.pop_back();
+        additional_nodes_explored++;
+      } while (true);
+
+      for (auto& item : q_set) {
+        if (!fixed[item.src] && item.dist == graph.getData(item.src).load()) {
+          heap_pushes++;
+          pushWrap(heap, item.src, item.dist);
+        } else {
+          duplicated_items++;
         }
       }
       q_set.clear();
@@ -379,6 +380,11 @@ void serSP1Algo(Graph& graph, const GNode& source, Pred& pred, Fixed& fixed,
 
   galois::runtime::reportStat_Single("SSSP-serSP1", "Outer loop iterations", outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Inner loop iterations", inner_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Heap pushes", heap_pushes);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes avoided", duplicated_items);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Additional nodes explored", additional_nodes_explored);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
 }
 
 void topoAlgo(Graph& graph, const GNode& source) {
@@ -559,19 +565,20 @@ int main(int argc, char** argv) {
     Tmain.start();
     topoTileAlgo(graph, source);
     break;
-  case serSP1:
-    using Pred = std::vector<int>;
-    using Fixed = std::vector<bool>;
+    case serSP1: {
+      using Pred = std::vector<int>;
+      using Fixed = std::vector<bool>;
 
-    auto edgeRange = OutEdgeRangeFn{graph};
+      auto edgeRange = OutEdgeRangeFn{graph};
 
-    Pred pred(graph.size(), 0);
-    Fixed fixed(graph.size(), false);
-    initPred(graph, pred, edgeRange);
+      Pred pred(graph.size(), 0);
+      Fixed fixed(graph.size(), false);
+      initPred(graph, pred, edgeRange);
 
-    Tmain.start();
-    serSP1Algo<UpdateRequest>(graph, source, pred, fixed, ReqPushWrap(), edgeRange);
-    break;
+      Tmain.start();
+      serSP1Algo<UpdateRequest>(graph, source, pred, fixed, ReqPushWrap(), edgeRange);
+      break;
+    }
   default:
     std::abort();
   }
