@@ -72,6 +72,10 @@ enable_testing()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -Wall")
 
+if(NOT APPLE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fp -fno-omit-frame-pointer")
+endif()
+
 if(NOT "$ENV{GCC_BIN}" STREQUAL "")
   # Preserve captured environment variable during reconfiguration
   set(CXX_TOOLCHAIN "$ENV{GCC_BIN}" CACHE STRING "GCC Toolchain")
@@ -224,7 +228,7 @@ if(USE_EXP)
   if(TBB_FOUND)
     include_directories(${TBB_INCLUDE_DIRS})
   endif()
-  
+
   find_package(CBLAS)
   if(CBLAS_FOUND)
     include_directories(${BLAS_INCLUDE_DIRS})
@@ -380,7 +384,6 @@ function(linkApp name extlibs)
   target_link_libraries(${name} lonestar)
   target_link_libraries(${name} galois_shmem)
   target_link_libraries(${name} gllvm)
-  target_link_libraries(${name} rt)
   target_link_libraries(${name} ${CMAKE_THREAD_LIBS_INIT})
 
   if(VTune_FOUND)
@@ -444,7 +447,7 @@ function(makeTest)
     linkApp(test-${name} "")
 
     list(APPEND commandline "$<TARGET_FILE:test-${name}>")
-  elseif(${APP_TARGET}) 
+  elseif(${APP_TARGET})
     get_filename_component(base ${name} NAME)
     if(TARGET ${base})
       list(APPEND commandline "$<TARGET_FILE:${base}>")
@@ -455,7 +458,7 @@ function(makeTest)
   else()
     list(APPEND commandline ${name})
   endif()
-  
+
   foreach(f ${APP_UNPARSED_ARGUMENTS})
     list(APPEND commandline ${f})
   endforeach()

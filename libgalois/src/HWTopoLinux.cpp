@@ -294,7 +294,7 @@ galois::substrate::getHWTopo() {
 
 //! binds current thread to OS HW context "proc"
 bool galois::substrate::bindThreadSelf(unsigned osContext) {
-#ifndef __CYGWIN__
+#if !defined(__CYGWIN__) && !defined(__APPLE__)
   cpu_set_t mask;
   /* CPU_ZERO initializes all the bits in the mask to zero. */
   CPU_ZERO(&mask);

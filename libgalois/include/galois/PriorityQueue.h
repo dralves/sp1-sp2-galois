@@ -248,9 +248,10 @@ public:
           std::remove(container.begin(), container.end(), x);
 
       ret = (nend != container.end());
-      container.erase(nend, container.end());
-
-      std::make_heap(container.begin(), container.end(), revCmp);
+      if (ret) {
+        container.erase(nend, container.end());
+        std::make_heap(container.begin(), container.end(), revCmp);
+      }
     }
 
     return ret;
