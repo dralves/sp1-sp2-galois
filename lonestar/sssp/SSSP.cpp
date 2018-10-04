@@ -350,7 +350,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
       GNode z = j.src;
 
       // Inner loop, go through the all the elements in R
-      do {
+      while(true) {
         auto& z_data = graph.getData(z);
         // Get all the vertices that have edges from z
         for (auto e : edgeRange(z)) {
@@ -368,7 +368,10 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
 
             if (k_data.dist > z_data.dist + z_k_dist) {
               k_data.dist = z_data.dist + z_k_dist;
-              if (!k_data.fixed) q_set.push_back(&k_data);
+              if (!k_data.fixed) {
+                heap_pushes++;
+                pushWrap(heap, k_data.node, k_data.dist);
+              }
             }
           }
         }
@@ -380,22 +383,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
         z = r_set.back();
         r_set.pop_back();
         additional_nodes_explored++;
-      } while (true);
-
-      for (auto& z : q_set) {
-        auto& z_data = *z;
-        if (!z_data.fixed) {
-          if (z_data.in_heap && z_data.heap_dist <= z_data.dist) {
-            duplicates_avoided++;
-            continue;
-          }
-          z_data.in_heap = true;
-          z_data.heap_dist = z_data.dist;
-          heap_pushes++;
-          pushWrap(heap, z_data.node, z_data.dist);
-        }
       }
-      q_set.clear();
     }
   }
 
