@@ -69,11 +69,12 @@ enum Algo {
   topo,
   topoTile,
   serSP1,
+  serSP2,
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep",    "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo",      "topoTile", "serSP1"};
+                                  "topo",      "topoTile", "serSP1", "serSP2"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -84,7 +85,8 @@ static cll::opt<Algo>
                      clEnumVal(dijkstraTile, "dijkstraTile"),
                      clEnumVal(dijkstra, "dijkstra"), clEnumVal(topo, "topo"),
                      clEnumVal(topoTile, "topoTile"),
-                     clEnumVal(serSP1, "serSP1"), clEnumValEnd),
+                     clEnumVal(serSP1, "serSP1"), 
+		     clEnumVal(serSP2, "serSP2"), clEnumValEnd),
          cll::init(deltaTile));
 
 struct NodeData;
@@ -395,6 +397,13 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-serSP1", "Additional nodes explored", additional_nodes_explored);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
+}
+
+
+template <typename T, typename P, typename R>
+void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
+                const R& edgeRange) {
+
 }
 
 void topoAlgo(Graph& graph, const GNode& source) {
