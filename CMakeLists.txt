@@ -1,12 +1,4 @@
 cmake_minimum_required(VERSION 3.2.0)
-
-set(MAKE_CXX_COMPILER "gcc")
-set(GCC_DIR ${TACC_GCC_BIN})
-set(CMAKE_COMPILER_IS_GNUCC "1")
-set(CMAKE_C_COMPILER "gcc")
-set(BOOST_ROOT ${TACC_BOOST_DIR})
-set(CMAKE_CXX_FLAGS "${COPTFLAGS} -std=c++17")
-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 project(Galois)
 set(GALOIS_VERSION_MAJOR "4")
@@ -80,7 +72,7 @@ enable_testing()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -Wall")
 
-if(APPLE)
+if(NOT APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fp -fno-omit-frame-pointer")
 endif()
 
@@ -392,7 +384,6 @@ function(linkApp name extlibs)
   target_link_libraries(${name} lonestar)
   target_link_libraries(${name} galois_shmem)
   target_link_libraries(${name} gllvm)
-  target_link_libraries(${name} rt)
   target_link_libraries(${name} ${CMAKE_THREAD_LIBS_INIT})
 
   if(VTune_FOUND)
