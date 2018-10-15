@@ -106,13 +106,15 @@ using GNode = Graph::GraphNode;
 struct NodeData {
   std::atomic<uint32_t> dist;
   int pred;
-  unsigned int minWeight;
+  unsigned int minWeight; 
+  unsigned int indist;
   bool fixed;
   bool in_heap;
   uint32_t heap_dist;
+  GNode in_node;
   GNode node;
 
-  NodeData(): dist(0), pred(0), minWeight(INF), fixed(false), in_heap(false), heap_dist(0), node(-1) {}
+  NodeData(): dist(0), pred(0), minWeight(INF), indist(INF), fixed(false), in_heap(false), heap_dist(0), in_node(-1), node(-1) {}
 };
 
 constexpr static const bool TRACK_WORK          = false;
@@ -309,6 +311,8 @@ void initGraph(Graph& graph, R& edgeRange) {
   for (auto vertex : graph) {
     for (auto edge : edgeRange(vertex)) {
       graph.getData(graph.getEdgeDst(edge)).pred++;
+      if((graph.getData(graph.getEdgeDst(edge)).minWeight) > graph.getEdgeData(edge))
+		graph.getData(graph.getEdgeDst(edge)).minWeight = graph.getEdgeData(edge);
     }
   }
 }
@@ -459,33 +463,27 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
           // If k vertex is not fixed, process the edge between z and k.
           if (!k_data.fixed) {
             auto& z_k_dist = graph.getEdgeData(e);
-            k_data.pred--;
-
-	    if ((k_data.dist == SSSP::DIST_INFINITY) && (k_data.pred > 0)) {
-		for (auto ii = graph.in_edge_begin(k, galois::MethodFlag::UNPROTECTED),
-			ee = graph.in_edge_end(k, galois::MethodFlag::UNPROTECTED) ; ii != ee; ++ii){
-		  if(ii == e){}
-		  else{
-		     auto kdist = graph.getInEdgeData(ii);
-		     if(k_data.minWeight > kdist){
-		        k_data.minWeight = kdist;
-		     }
-		  }	
-	        }
-	    }
+	    k_data.pred--;
 
             if (k_data.dist > z_data.dist + z_k_dist) {
-              k_data.dist = z_data.dist + z_k_dist;
-              if (!k_data.fixed) {
-                heap_pushes++;
-                pushWrap(heap, k_data.node, k_data.dist);
-              }
+		if(( k_data.dist == SSSP::DIST_INFINITY ) && (k_data.pred > 0)){
+              		k_data.dist = z_data.dist + z_k_dist;
+			k_data.indist = k_data.dist; 
+			k_data.in_node = z;
+		}
+		else
+			k_data.dist = z_data.dist + z_k_dist;
             }
 
-            if ((k_data.pred <= 0) || (k_data.dist <= k_data.minWeight + z_data.dist)) {
-              k_data.fixed = true;
-              r_set.push_back(k);
-	    }
+            if ((k_data.pred <= 0) || ((k_data.dist <= (k_data.indist + k_data.minWeight)) && (k_data.in_node != z) && (k_data.minWeight != z_k_dist))){
+                k_data.fixed = true;
+                r_set.push_back(k);
+            }
+
+            if (!k_data.fixed) {
+                heap_pushes++;
+                pushWrap(heap, k_data.node, k_data.dist);
+            }
           }
         }
 
