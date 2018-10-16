@@ -463,8 +463,10 @@ public:
     ++num;
     if (!last || last->full())
       extend_last();
+#ifndef NDEBUG
     pointer p = last->emplace_back(std::forward<Args>(args)...);
     assert(p);
+#endif
   }
 
   template <typename ValueTy>
@@ -478,8 +480,10 @@ public:
     ++num;
     if (!first || first->full())
       extend_first();
+#ifndef NDEBUG
     pointer p = first->emplace_front(std::forward<Args>(args)...);
     assert(p);
+#endif
   }
 
   template <typename ValueTy>
