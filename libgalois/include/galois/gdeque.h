@@ -24,6 +24,7 @@
 #include "galois/Mem.h"
 #include "galois/TwoLevelIteratorA.h"
 
+#include <boost/core/ignore_unused.hpp>
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/reverse_iterator.hpp>
 
@@ -463,7 +464,10 @@ public:
     ++num;
     if (!last || last->full())
       extend_last();
-    pointer p = last->emplace_back(std::forward<Args>(args)...);
+
+    pointer p;
+    p = last->emplace_back(std::forward<Args>(args)...);
+    boost::ignore_unused(p);
     assert(p);
   }
 
@@ -478,7 +482,9 @@ public:
     ++num;
     if (!first || first->full())
       extend_first();
-    pointer p = first->emplace_front(std::forward<Args>(args)...);
+    pointer p;
+    boost::ignore_unused(p);
+    p = first->emplace_front(std::forward<Args>(args)...);
     assert(p);
   }
 
