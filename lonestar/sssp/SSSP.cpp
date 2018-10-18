@@ -69,11 +69,12 @@ enum Algo {
   topo,
   topoTile,
   serSP1,
+  parSP1,
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep",    "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo",      "topoTile", "serSP1"};
+                                  "topo",      "topoTile", "serSP1", "parSP1"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -84,7 +85,8 @@ static cll::opt<Algo>
                      clEnumVal(dijkstraTile, "dijkstraTile"),
                      clEnumVal(dijkstra, "dijkstra"), clEnumVal(topo, "topo"),
                      clEnumVal(topoTile, "topoTile"),
-                     clEnumVal(serSP1, "serSP1"), clEnumValEnd),
+                     clEnumVal(serSP1, "serSP1"),
+                     clEnumVal(parSP1, "parSP1"), clEnumValEnd),
          cll::init(deltaTile));
 
 constexpr static const bool TRACK_WORK          = false;
@@ -443,6 +445,143 @@ void serSP1Algo(Graph& graph, const GNode& source,
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
 }
 
+template<typename GNode, typename GEdge>
+struct OutEdge {
+  GNode src;
+  GEdge edge;
+
+  // OutEdge(const GNode& _src, const GEdge& _edge) : src(_src), edge(_edge) {}
+
+  // // Move constructor.
+  // OutEdge(OutEdge&& other) : src(std::move(other.src)), edge(std::move(other.edge)) {
+  // }
+
+  // // Copy constructor.
+  // OutEdge(const OutEdge& other) : src(0), edge(0) {
+  //   src = other.src;
+  //   edge = other.edge;
+  // }
+
+  // OutEdge& operator=(const OutEdge& other) {
+  //   src = other.src;
+  //   edge = other.edge;
+  //   return *this;
+  // }
+
+  //  OutEdge& operator=(OutEdge&& other)
+  // {
+  //  src = std::move(other.src);
+  //  edge = std::move(other.edge);
+  //  return *this;
+  // }
+};
+
+template<typename GNode,
+         typename GEdge,
+         typename Container,
+         typename R>
+inline void push_back_edges_of_node(const GNode& node,
+                                    Container& c,
+                                    const R& edgeRange) {
+  for (auto& edge : edgeRange(node)) {
+    std::cout << "Edge iter: " << boost::core::demangle(typeid(edge).name()) << std::endl;
+    std::cout << "Edge: " << boost::core::demangle(typeid(*edge).name()) << std::endl;
+    std::cout << "Container: " << boost::core::demangle(typeid(c).name()) << std::endl;
+    OutEdge<GNode, GEdge> out_edge{node, *edge};
+    std::cout << "OutEdge: " << boost::core::demangle(typeid(out_edge).name()) << std::endl;
+    std::cout << "Adding to r_set: " << node << " edge: " << *edge << std::endl;
+    c.push_back(out_edge);
+  }
+}
+
+template <typename GType,
+          typename T,
+          typename P,
+          typename R,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename GEdge = typename GType::Graph::edge_iterator::value_type,
+          typename GNodeData = typename GType::Graph::node_data_type,
+          typename Traits = typename GType::Traits>
+void parSP1Algo(Graph& graph,
+                const GNode& source,
+                const P& pushWrap,
+                const R& edgeRange) {
+
+  using Heap = galois::MinHeap<T>;
+  using OutEdge = OutEdge<GNode, GEdge>;
+  using PSchunk = galois::worklists::PerSocketChunkLIFO<16>;
+
+  Heap heap;
+  pushWrap(heap, source, 0);
+
+  // The set of nodes which have been fixed but not explored
+  // This is a parallel data structure that is optimized for
+  // parallel writes, but requires serial reads.
+  galois::InsertBag<GNodeData*> q_set;
+
+  // A step in an unbundled r set which looks at a single edge
+  // from a node in the r_set.
+  auto r_set_edge_loop = [&](OutEdge& z_edge, auto& ctx) {
+    std::cout << "Edge: " << z_edge.edge << std::endl;
+    std::cout << "Src Node: " << z_edge.src << std::endl;
+    auto& z_data = graph.getData(z_edge.src);
+    auto k = graph.getEdgeDst(z_edge.edge);
+    std::cout << "Dst Node: " << k << std::endl;
+    auto& k_data = graph.getData(k);
+    // If k vertex is not fixed, process the edge between z and k.
+    if (!k_data.fixed) {
+      auto z_k_dist = graph.getEdgeData(z_edge.edge);
+      k_data.pred--;
+      if (k_data.pred <= 0) {
+        k_data.fixed = true;
+        push_back_edges_of_node<GNode, GEdge>(k, ctx, edgeRange);
+      }
+
+      if (k_data.dist > z_data.dist + z_k_dist) {
+        k_data.dist = z_data.dist + z_k_dist;
+        if (!k_data.fixed) {
+          q_set.push_back(&k_data);
+        }
+      }
+    }
+  };
+
+  // While the heap is not empty
+  while (!heap.empty()) {
+    // Get the min element from the heap.
+    T j = heap.pop();
+    auto& j_data = graph.getData(j.src);
+
+    std::cout << "Popping from heap: " << j_data.node << " : " << j_data.dist << std::endl;
+
+    if (j_data.dist < j.dist) {
+      continue;
+    }
+
+    // If the min element is not fixed
+    if (!j_data.fixed) {
+      // Set the element to fixed
+      j_data.fixed = true;
+
+      galois::gstl::Vector<OutEdge> initial;
+      push_back_edges_of_node<GNode, GEdge>(j.src, initial, edgeRange);
+      galois::for_each(galois::iterate(initial),
+                       r_set_edge_loop,
+                       galois::wl<PSchunk>(),
+                       galois::loopname("sssp_parsp1_inner"));
+    }
+
+    for (auto& z : q_set) {
+      auto& z_data = *z;
+      std::cout << "Pushing to heap: " << z_data.node << " : " << z_data.dist << std::endl;
+      pushWrap(heap, z_data.node, z_data.dist);
+    }
+
+    q_set.clear();
+  }
+}
+
 template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
@@ -757,6 +896,23 @@ int main(int argc, char** argv) {
       Tmain.stop();
 
       verify_and_report<SerGType>(graph, source, report);
+      break;
+    }
+    case parSP1: {
+      ParGType::Graph graph;
+      ParGType::GNode source, report;
+      init_graph<ParGType>(graph, source, report);
+      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
+
+      Tmain.start();
+      parSP1Algo<ParGType, ParGType::Traits::UpdateRequest>(
+          graph, source,
+          ParGType::Traits::ReqPushWrap(),
+          edgeRange);
+      Tmain.stop();
+
+      verify_and_report<ParGType>(graph, source, report);
       break;
     }
     default:
