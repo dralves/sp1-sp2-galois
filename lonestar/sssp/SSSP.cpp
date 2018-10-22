@@ -414,7 +414,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 
   Heap heap;
   pushWrap(heap, source, 0);
-  auto k_data_indist = 0; 
+  auto d = 0; 
 
   // The set of nodes which have been fixed but not explored
   galois::gstl::Vector<GNode> r_set;
@@ -449,6 +449,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
       // Set the element to fixed
       j_data.fixed = true;
       GNode z = j.src;
+      d = j_data.dist;
 
       // Inner loop, go through the all the elements in R
       while(true) {
@@ -461,27 +462,16 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
           // If k vertex is not fixed, process the edge between z and k.
           if (!k_data.fixed) {
 
-            if(k_data.dist == SSSP::DIST_INFINITY){
-                k_data_indist = 0;
-            }
-
-
             auto& z_k_dist = graph.getEdgeData(e);
 	    k_data.pred--;
 
             if (k_data.dist > z_data.dist + z_k_dist) {
-		if(k_data.dist != SSSP::DIST_INFINITY){
-               	k_data_indist = k_data.dist;
-		}
 		k_data.dist = z_data.dist + z_k_dist;
             }
 
-
-            if ((k_data.pred <=0) || (k_data.dist <= (k_data_indist + k_data.minWeight))){
-		if(k_data.minWeight != z_k_dist){
+            if ((k_data.pred <=0) || (k_data.dist <= (d + k_data.minWeight))){
                 k_data.fixed = true;
                 r_set.push_back(k);
-		}
             }
 
             if (!k_data.fixed) {
