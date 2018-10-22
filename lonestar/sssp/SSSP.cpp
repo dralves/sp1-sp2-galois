@@ -464,20 +464,20 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 
             auto& z_k_dist = graph.getEdgeData(e);
 	    k_data.pred--;
+            auto temp  = z_data.dist + z_k_dist;
 
-            if (k_data.dist > z_data.dist + z_k_dist) {
-		k_data.dist = z_data.dist + z_k_dist;
-            }
-
-            if ((k_data.pred <=0) || (k_data.dist <= (d + k_data.minWeight))){
+            if ((k_data.pred <=0) || ((temp <= (d + k_data.minWeight)) && k_data.dist > temp)){
                 k_data.fixed = true;
                 r_set.push_back(k);
             }
 
-            if (!k_data.fixed) {
-                heap_pushes++;
-                pushWrap(heap, k_data.node, k_data.dist);
-            }
+            if (k_data.dist > z_data.dist + z_k_dist) {
+                k_data.dist = z_data.dist + z_k_dist;
+		
+        	if (!k_data.fixed) {
+	            q_set.push_back(&k_data);
+            	}
+	    }	
           }
         }
 
@@ -489,6 +489,21 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
         r_set.pop_back();
         additional_nodes_explored++;
       }
+      for (auto& z : q_set) {
+        auto& z_data = *z;
+        if (!z_data.fixed) {
+          if (z_data.in_heap && z_data.heap_dist <= z_data.dist) {
+            duplicates_avoided++;
+            continue;
+          }
+          z_data.in_heap = true;
+          z_data.heap_dist = z_data.dist;
+          heap_pushes++;
+          pushWrap(heap, z_data.node, z_data.dist);
+        }
+      }
+      q_set.clear();
+
     }
   }
 
