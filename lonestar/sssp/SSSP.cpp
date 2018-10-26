@@ -417,7 +417,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
   auto d = 0; 
 
   // The set of nodes which have been fixed but not explored
-  galois::gstl::Vector<GNode> r_set;
+  galois::gstl::Deque<GNode> r_set;
   galois::gstl::Vector<NodeData*> q_set;
 
   size_t outer_iter = 0;
@@ -438,11 +438,6 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
     outer_iter++;
 
     auto& j_data = graph.getData(j.src);
-
-    if (j_data.dist < j.dist) {
-      duplicated_items++;
-      continue;
-    }
 
     // If the min element is not fixed
     if (!j_data.fixed) {
@@ -485,33 +480,22 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
         middle_iter++;
 
         if (r_set.empty()) break;
-        z = r_set.back();
-        r_set.pop_back();
+        z = r_set.front();
+        r_set.pop_front();
         additional_nodes_explored++;
       }
       for (auto& z : q_set) {
         auto& z_data = *z;
-        if (!z_data.fixed) {
-          if (z_data.in_heap && z_data.heap_dist <= z_data.dist) {
-            duplicates_avoided++;
-            continue;
-          }
-          z_data.in_heap = true;
-          z_data.heap_dist = z_data.dist;
-          heap_pushes++;
-          pushWrap(heap, z_data.node, z_data.dist);
-        }
+        heap_pushes++;
+        pushWrap(heap, z_data.node, z_data.dist);
       }
       q_set.clear();
-
     }
   }
 
   galois::runtime::reportStat_Single("SSSP-serSP2", "Outer loop iterations", outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Inner loop iterations", inner_iter);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Duplicated heap pushes", duplicated_items);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Duplicated heap pushes avoided", duplicates_avoided);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Additional nodes explored", additional_nodes_explored);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Average heap size", (average_heap_size * 1.0) / outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Average rset size", (average_rset_size + 1.0) / middle_iter);
