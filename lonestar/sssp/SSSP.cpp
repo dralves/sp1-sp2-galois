@@ -70,11 +70,12 @@ enum Algo {
   topoTile,
   serSP1,
   serSP2,
+  serSP3,
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep",    "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo",      "topoTile", "serSP1", "serSP2"};
+                                  "topo",      "topoTile", "serSP1", "serSP2", "serSP3"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -86,7 +87,8 @@ static cll::opt<Algo>
                      clEnumVal(dijkstra, "dijkstra"), clEnumVal(topo, "topo"),
                      clEnumVal(topoTile, "topoTile"),
                      clEnumVal(serSP1, "serSP1"), 
-		     clEnumVal(serSP2, "serSP2"), clEnumValEnd),
+		     clEnumVal(serSP2, "serSP2"),
+		     clEnumVal(serSP3, "serSP3"), clEnumValEnd),
          cll::init(deltaTile));
 
 struct NodeData;
@@ -508,6 +510,16 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 
 }
 
+template <typename T, typename P, typename R>
+void serSP3Algo(Graph& graph, const GNode& source, const P& pushWrap,
+                const R& edgeRange) {
+
+  using Heap = galois::MinHeap<T>;
+
+  Heap heap;
+
+}
+
 void topoAlgo(Graph& graph, const GNode& source) {
 
   galois::LargeArray<Dist> oldDist;
@@ -690,26 +702,28 @@ int main(int argc, char** argv) {
     Tmain.start();
     topoTileAlgo(graph, source);
     break;
-    case serSP1: {
-      auto edgeRange = OutEdgeRangeFn{graph};
-      initGraph(graph, edgeRange);
-
-      Tmain.start();
-      serSP1Algo<UpdateRequest>(graph, source, ReqPushWrap(), edgeRange);
-      break;
-    }
-
-    case serSP2: {
-      auto edgeRange = OutEdgeRangeFn{graph};
-      initGraph(graph, edgeRange);
-
-      Tmain.start();
-      serSP2Algo<UpdateRequest>(graph, source, ReqPushWrap(), edgeRange);
-      break;
-    }
-
-
-  default:
+   case serSP1: {
+    auto edgeRange = OutEdgeRangeFn{graph};
+    initGraph(graph, edgeRange);
+    Tmain.start();
+    serSP1Algo<UpdateRequest>(graph, source, ReqPushWrap(), edgeRange);
+    break;
+   }
+   case serSP2: {
+    auto edgeRange = OutEdgeRangeFn{graph};
+    initGraph(graph, edgeRange);
+    Tmain.start();
+    serSP2Algo<UpdateRequest>(graph, source, ReqPushWrap(), edgeRange);
+    break;
+   }
+   case serSP3: {
+    auto edgeRange = OutEdgeRangeFn{graph};
+    initGraph(graph, edgeRange);
+    Tmain.start();
+    serSP3Algo<UpdateRequest>(graph, source, ReqPushWrap(), edgeRange);
+    break;
+   }
+   default:
     std::abort();
   }
 
