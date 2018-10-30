@@ -227,6 +227,12 @@ public:
     std::push_heap(container.begin(), container.end(), revCmp);
   }
 
+  value_type read() {
+     assert(!container.empty());
+     value_type x = container.front();
+     return x;
+  }
+
   value_type pop() {
     assert(!container.empty());
     std::pop_heap(container.begin(), container.end(), revCmp);
@@ -260,6 +266,8 @@ public:
   bool find(const value_type& x) const {
     return (std::find(begin(), end(), x) != end());
   }
+
+  void sort() { std::sort_heap(container.begin(), container.end()); } 
 
   void clear() { container.clear(); }
 
@@ -344,6 +352,13 @@ public:
     return x;
   }
 
+  value_type read() {
+    mutex.lock();
+    value_type x = heap.read();
+    mutex.unlock();
+    return x;
+  }
+
   bool remove(const value_type& x) {
     // TODO: write a better remove method
     mutex.lock();
@@ -364,6 +379,12 @@ public:
   void clear() {
     mutex.lock();
     heap.clear();
+    mutex.unlock();
+  }
+
+  void sort(){
+    mutex.lock();
+    heap.sort();
     mutex.unlock();
   }
 

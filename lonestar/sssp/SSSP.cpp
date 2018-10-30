@@ -412,7 +412,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 
   using Heap = galois::MinHeap<T>;
 
-  Heap heap;
+  Heap heap,heap1;
   pushWrap(heap, source, 0);
   auto d = 0; 
 
@@ -435,6 +435,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
     average_heap_size += heap.size();
     // Get the min element from the heap.
     T j = heap.pop();
+
     outer_iter++;
 
     auto& j_data = graph.getData(j.src);
@@ -450,6 +451,20 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
       j_data.fixed = true;
       GNode z = j.src;
       d = j_data.dist;
+      
+      while(!heap.empty()){
+	T j_ch = heap.read();
+	auto& j_ch_data = graph.getData(j_ch.src);
+
+	if( j_ch_data.dist == j_data.dist && j_ch_data.fixed != true ){
+          j_ch_data.fixed = true;
+	  GNode z_ch = j_ch.src;
+	  r_set.push_back(z_ch);
+	  heap.pop();
+	  continue;
+	}
+	break;
+      }
 
       // Inner loop, go through the all the elements in R
       while(true) {
