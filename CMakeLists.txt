@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.2.0)
 
-set(MAKE_CXX_COMPILER "gcc")
-set(GCC_DIR ${TACC_GCC_BIN})
-set(CMAKE_COMPILER_IS_GNUCC "1")
-set(CMAKE_C_COMPILER "gcc")
 set(BOOST_ROOT ${TACC_BOOST_DIR})
-set(CMAKE_CXX_FLAGS "${COPTFLAGS} -std=c++17")
+set(stats ${STATS})
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 project(Galois)
@@ -96,8 +92,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
   if(ICC_VERSION VERSION_LESS 16.0)
     message(FATAL_ERROR "ICC must be 16.0 or higher; found: ${ICC_VERSION} instead")
   endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd68 -wd981 -wd383 -wd869 -wd2196 -wd279 -wd2504 -wd2943 -wd32013 -wd3373")
 
+  if(stats)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd68 -wd981 -wd383 -wd869 -wd2196 -wd279 -wd2504 -wd2943 -wd32013 -wd3373 -DSTATS")
+  else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd68 -wd981 -wd383 -wd869 -wd2196 -wd279 -wd2504 -wd2943 -wd32013 -wd3373")
+  endif()
+ 
   if(CXX_TOOLCHAIN)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gxx-name=${CXX_TOOLCHAIN}/g++")
   else()
