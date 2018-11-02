@@ -122,6 +122,11 @@ public:
     this->push(std::forward<Args>(args)...);
   }
 
+  template <typename... Args>
+  inline void emplace_back(Args&&... args) {
+    this->push(std::forward<Args>(args)...);
+  }
+
   //! Push new work
   template <typename... Args>
   inline void insert(Args&&... args) {

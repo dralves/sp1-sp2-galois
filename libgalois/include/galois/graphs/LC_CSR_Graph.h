@@ -406,6 +406,7 @@ public:
   }
 
   GraphNode getEdgeDst(edge_iterator ni) { return edgeDst[*ni]; }
+  GraphNode getEdgeDst(EdgeIndData::value_type edge) { return edgeDst[edge]; }
 
   size_t size() const { return numNodes; }
   size_t sizeEdges() const { return numEdges; }
