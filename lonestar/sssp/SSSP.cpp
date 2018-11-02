@@ -97,6 +97,7 @@ struct SerNodeData {
   int pred;
   uint32_t dist;
   bool fixed;
+  uint32_t min_in_weight;
   SerNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
 };
 
@@ -106,6 +107,7 @@ struct ParNodeData {
   std::atomic<int> pred;
   std::atomic<uint32_t> dist;
   std::atomic<bool> fixed;
+  uint32_t min_in_weight;
   ParNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
 };
 
@@ -342,7 +344,9 @@ void calc_graph_predecessors(Graph& graph, R& edgeRange) {
   // Fill the pred array
   for (auto vertex : graph) {
     for (auto edge : edgeRange(vertex)) {
-      graph.getData(graph.getEdgeDst(edge)).pred++;
+      auto& k_data = graph.getData(graph.getEdgeDst(edge));
+      k_data.pred++;
+      k_data.min_in_weight = std::min(k_data.min_in_weight, graph.getEdgeData(edge));
     }
   }
 }
@@ -588,6 +592,7 @@ void init_graph(Graph& graph, GNode& source, GNode& report) {
                  [&graph](GNode n) {
                    auto& data = graph.getData(n);
                    data.dist = SSSP::DIST_INFINITY;
+                   data.min_in_weight = SSSP::DIST_INFINITY;
                    data.node = n;
                  });
 
