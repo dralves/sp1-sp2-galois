@@ -261,28 +261,35 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
   WL wl;
   pushWrap(wl, source, 0);
-
+  
+  #ifdef STATS
   size_t iter = 0;
   size_t inner_iter = 0;
   size_t heap_pushes =0;
   double average_heap_size = 0;
   size_t duplicated_items = 0;
+  #endif
 
   while (!wl.empty()) {
+    #ifdef STATS
     ++iter;
     average_heap_size += wl.size();
+    #endif
 
     T item = wl.pop();
 
     if (graph.getData(item.src).dist < item.dist) {
+      #ifdef STATS
       duplicated_items++;
+      #endif
       continue;
     }
 
     for (auto e : edgeRange(item)) {
-
+      #ifdef STATS
       inner_iter++;
-      GNode dst   = graph.getEdgeDst(e);
+      #endif
+      GNode dst = graph.getEdgeDst(e);
       auto& ddata = graph.getData(dst);
 
       const auto newDist = item.dist + graph.getEdgeData(e);
@@ -290,27 +297,49 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
       if (newDist < ddata.dist) {
         ddata.dist = newDist;
         pushWrap(wl, dst, newDist);
+        #ifdef STATS
         heap_pushes++;
+	#endif
       }
     }
   }
+  
 
+  #ifdef STATS
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Inner iteration", inner_iter);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Heap pushes", heap_pushes);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
+  #endif
 }
 
 template<typename R>
 void initGraph(Graph& graph, R& edgeRange) {
+  galois::gstl::Deque<GNode> pred_set;
   // Fill the pred array
   for (auto vertex : graph) {
     for (auto edge : edgeRange(vertex)) {
       graph.getData(graph.getEdgeDst(edge)).pred++;
       if((graph.getData(graph.getEdgeDst(edge)).minWeight) > graph.getEdgeData(edge))
-		graph.getData(graph.getEdgeDst(edge)).minWeight = graph.getEdgeData(edge);
+	graph.getData(graph.getEdgeDst(edge)).minWeight = graph.getEdgeData(edge);
     }
+  }
+  //add vertices with degree 0 to a queue
+  for (auto vertex : graph){
+    if(graph.getData(vertex).pred == 0)
+      pred_set.push_back(vertex);
+  }
+  //decrement pred count of neighbours having an incoming edge from a vertex with degree 0
+  while(!pred_set.empty()){
+     GNode Vertex = pred_set.front();
+     pred_set.pop_front();
+     for (auto edge : edgeRange(Vertex)){
+       graph.getData(graph.getEdgeDst(edge)).pred--;
+       if(graph.getData(graph.getEdgeDst(edge)).pred == 0){
+         pred_set.push_back(graph.getEdgeDst(edge));
+       }
+     }
   }
 }
 
@@ -327,6 +356,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::gstl::Vector<GNode> r_set;
   galois::gstl::Vector<NodeData*> q_set;
 
+  #ifdef STATS
   size_t outer_iter = 0;
   size_t middle_iter = 0;
   size_t additional_nodes_explored = 0;
@@ -336,18 +366,23 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   size_t average_rset_size = 0;
   size_t duplicated_items = 0;
   size_t duplicates_avoided = 0;
+  #endif
 
   // While the heap is not empty
   while (!heap.empty()) {
+    #ifdef STATS
+    outer_iter++;
     average_heap_size += heap.size();
+    #endif
     // Get the min element from the heap.
     T j = heap.pop();
-    outer_iter++;
 
     auto& j_data = graph.getData(j.src);
 
     if (j_data.dist < j.dist) {
+      #ifdef STATS
       duplicated_items++;
+      #endif
       continue;
     }
 
@@ -362,7 +397,9 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
         auto& z_data = graph.getData(z);
         // Get all the vertices that have edges from z
         for (auto e : edgeRange(z)) {
+      	  #ifdef STATS
           inner_iter++;
+	  #endif
           GNode k = graph.getEdgeDst(e);
           auto& k_data = graph.getData(k);
           // If k vertex is not fixed, process the edge between z and k.
@@ -377,24 +414,30 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
             if (k_data.dist > z_data.dist + z_k_dist) {
               k_data.dist = z_data.dist + z_k_dist;
               if (!k_data.fixed) {
+		#ifdef STATS
                 heap_pushes++;
+		#endif
                 pushWrap(heap, k_data.node, k_data.dist);
               }
             }
           }
         }
-
+	#ifdef STATS
         average_rset_size += r_set.size();
         middle_iter++;
+	#endif
 
         if (r_set.empty()) break;
         z = r_set.back();
         r_set.pop_back();
+	#ifdef STATS
         additional_nodes_explored++;
+	#endif
       }
     }
   }
 
+  #ifdef STATS
   galois::runtime::reportStat_Single("SSSP-serSP1", "Outer loop iterations", outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Inner loop iterations", inner_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Heap pushes", heap_pushes);
@@ -403,6 +446,7 @@ void serSP1Algo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-serSP1", "Additional nodes explored", additional_nodes_explored);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
+  #endif
 }
 
 
@@ -412,14 +456,15 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 
   using Heap = galois::MinHeap<T>;
 
-  Heap heap,heap1;
+  Heap heap;
   pushWrap(heap, source, 0);
   auto d = 0; 
 
   // The set of nodes which have been fixed but not explored implemented as a queue
   galois::gstl::Deque<GNode> r_set;
   galois::gstl::Vector<NodeData*> q_set;
-
+  
+  #ifdef STATS
   size_t outer_iter = 0;
   size_t middle_iter = 0;
   size_t additional_nodes_explored = 0;
@@ -429,29 +474,33 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
   size_t average_rset_size = 0;
   size_t duplicated_items = 0;
   size_t duplicates_avoided = 0;
+  #endif
 
   // While the heap is not empty
   while (!heap.empty()) {
+    #ifdef STATS
     average_heap_size += heap.size();
+    outer_iter++;
+    #endif
     // Get the min element from the heap.
     T j = heap.pop();
-
-    outer_iter++;
 
     auto& j_data = graph.getData(j.src);
 
     if (j_data.dist < j.dist) {
+      #ifdef STATS
       duplicated_items++;
+      #endif
       continue;
     }
-
+    
     // If the min element is not fixed
     if (!j_data.fixed) {
       // Set the element to fixed
       j_data.fixed = true;
       GNode z = j.src;
       d = j_data.dist;
-      
+
       while(!heap.empty()){
 	T j_ch = heap.read();
 	auto& j_ch_data = graph.getData(j_ch.src);
@@ -471,7 +520,9 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
         auto& z_data = graph.getData(z);
         // Get all the vertices that have edges from z
         for (auto e : edgeRange(z)) {
+          #ifdef STATS
           inner_iter++;
+	  #endif
           GNode k = graph.getEdgeDst(e);
           auto& k_data = graph.getData(k);
           // If k vertex is not fixed, process the edge between z and k.
@@ -481,7 +532,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 	    k_data.pred--;
 	    auto k_dist = z_data.dist + z_k_dist;
 
-            if ((k_data.pred <=0) || (k_dist <= (d + k_data.minWeight) && k_data.dist > k_dist)){
+            if ((k_data.pred <=0) || k_dist <= (d + k_data.minWeight)){
                 k_data.fixed = true;
                 r_set.push_back(k);
             }
@@ -495,24 +546,31 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
           }
         }
 
+    	#ifdef STATS
         average_rset_size += r_set.size();
         middle_iter++;
+	#endif
 
         if (r_set.empty()) break;
         z = r_set.front();
         r_set.pop_front();
+    	#ifdef STATS
         additional_nodes_explored++;
+	#endif
       }
 
       for (auto& z : q_set) {
         auto& z_data = *z;
+    	#ifdef STATS
         heap_pushes++;
+	#endif
         pushWrap(heap, z_data.node, z_data.dist);
       }
       q_set.clear();
     }
   }
 
+  #ifdef STATS
   galois::runtime::reportStat_Single("SSSP-serSP2", "Outer loop iterations", outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Inner loop iterations", inner_iter);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Heap pushes", heap_pushes);
@@ -520,6 +578,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-serSP2", "Additional nodes explored", additional_nodes_explored);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Average heap size", (average_heap_size * 1.0) / outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP2", "Average rset size", (average_rset_size + 1.0) / middle_iter);
+  #endif
 
 }
 
