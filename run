@@ -37,38 +37,38 @@ module load boost
 
 # Launch serial code...
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo dijkstraTile -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo serSP1 -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo serSP2 -delta 13 -t 40
 
 
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo dijkstraTile -delta 13 -t 40
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo serSP1 -delta 13 -t 40
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo serSP2 -delta 13 -t 40
 
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo dijkstraTile -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo serSP1 -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo serSP2 -delta 13 -t 40
 
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo dijkstraTile -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo serSP1 -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo serSP2 -delta 13 -t 40
 
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo dijkstraTile -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo serSP1 -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo serSP2 -delta 13 -t 40
 
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo dijkstraTile -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo serSP1 -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo serSP2 -delta 13 -t 40
 
 #/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo dijkstra -delta 13 -t 40
-#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo dijkstraTile -delta 100 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo dijkstraTile -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo serSP1 -delta 13 -t 40
 /work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo serSP2 -delta 13 -t 40
 
