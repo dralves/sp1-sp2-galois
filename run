@@ -1,0 +1,95 @@
+#!/bin/bash
+#----------------------------------------------------
+# Sample Slurm job script
+#   for TACC Stampede2 KNL nodes
+#
+#   *** Serial Job on Normal Queue ***
+# 
+# Last revised: 20 Oct 2017
+#
+# Notes:
+#
+#   -- Copy/edit this script as desired.  Launch by executing
+#      "sbatch knl.serial.slurm" on a Stampede2 login node.
+#
+#   -- Serial codes run on a single node (upper case N = 1).
+#        A serial code ignores the value of lower case n,
+#        but slurm needs a plausible value to schedule the job.
+#
+#   -- For a good way to run multiple serial executables at the
+#        same time, execute "module load launcher" followed
+#        by "module help launcher".
+
+#----------------------------------------------------
+
+#SBATCH -J sp1          # Job name
+#SBATCH -o sp1.o%j       # Name of stdout output file
+#SBATCH -e sp1.e%j       # Name of stderr error file
+#SBATCH -p normal          # Queue (partition) name
+#SBATCH -N 3               # Total # of nodes (must be 1 for serial)
+#SBATCH -n 1               # Total # of mpi tasks (should be 1 for serial)
+#SBATCH -t 05:00:00        # Run time (hh:mm:ss)
+#SBATCH --mail-user=skmadan@utexas.edu
+
+# Other commands must follow all #SBATCH directives...
+
+module load boost
+
+# Launch serial code...
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo dijkstraTile -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG4.gr -algo serSP2 -delta 13 -t 40
+
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo dijkstraTile -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo serSP1 -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/new.gr -algo serSP2 -delta 13 -t 40
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo dijkstraTile -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG1.gr -algo serSP2 -delta 13 -t 40
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo dijkstraTile -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG2.gr -algo serSP2 -delta 13 -t 40
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo dijkstraTile -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/DAG3.gr -algo serSP2 -delta 13 -t 40
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo dijkstraTile -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_100M_250M.gr -algo serSP2 -delta 13 -t 40
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo dijkstra -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo dijkstraTile -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/input_graphs/ParMAT_150M_250M.gr -algo serSP2 -delta 13 -t 40
+
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/random/r4-2e23.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/random/r4-2e23.gr -algo serSP2 -delta 13 -t 40
+
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/random/r4-2e24.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/random/r4-2e24.gr -algo serSP2 -delta 13 -t 40
+
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/random/r4-2e26.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/random/r4-2e26.gr -algo serSP2 -delta 13 -t 40
+
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/road/USA-road-d.USA.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/road/USA-road-d.USA.gr -algo serSP2 -delta 13 -t 40
+
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/scalefree/rmat8-2e14.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/scalefree/rmat8-2e14.gr -algo serSP2 -delta 13 -t 40
+
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/structured/rome99.gr -algo serSP1 -delta 13 -t 40
+/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/structured/rome99.gr -algo serSP2 -delta 13 -t 40
+
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/structured/torus5.gr -algo serSP1 -delta 13 -t 40
+#/work/05888/madansk/stampede2/repository/stampede_build/build/lonestar/sssp/sssp /work/05888/madansk/stampede2/repository/stampede_build/build/inputs/reference/structured/torus5.gr -algo serSP2 -delta 13 -t 40
+#----------------------------------------------------
