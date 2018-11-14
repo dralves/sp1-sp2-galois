@@ -199,6 +199,7 @@ void deltaStepAlgo(Graph& graph,
                        Dist ew            = graph.getEdgeData(ii, flag);
                        const Dist newDist = sdata.dist + ew;
 
+
                        while (true) {
                          Dist oldDist = ddist.dist;
 
@@ -248,7 +249,6 @@ void serDeltaAlgo(Graph& graph, const GNode& source,
   using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
 
   SerialBucketWL<T, UpdateRequestIndexer> wl(UpdateRequestIndexer{stepShift});
-  ;
   graph.getData(source).dist = 0;
 
   pushWrap(wl, source, 0);
@@ -463,11 +463,13 @@ template <typename GType,
           typename R,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
+          typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
 void serSP2Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange) {
 
   using Heap = galois::MinHeap<T>;
+  using Dist = typename Traits::Dist;
 
   Heap heap;
   pushWrap(heap, source, 0);
@@ -476,6 +478,11 @@ void serSP2Algo(Graph& graph, const GNode& source,
   galois::gstl::Vector<GNode> r_set;
 
   size_t outer_iter = 0;
+  size_t sp2_condition_applied = 0;
+  size_t sp1_condition_applied = 0;
+  size_t q_set_for_the_rescue = 0;
+  size_t nodes_popped_fixed = 0;
+  size_t nodes_fixed = 0;
   size_t middle_iter = 0;
   size_t additional_nodes_explored = 0;
   size_t inner_iter = 0;
@@ -485,8 +492,11 @@ void serSP2Algo(Graph& graph, const GNode& source,
   size_t duplicated_items = 0;
   size_t duplicates_avoided = 0;
 
+  std::vector<std::pair<GNodeData*, Dist>> q_set;
+  q_set.reserve(1000);
+
   // While the heap is not empty
-  while (!heap.empty()) {
+  while (!heap.empty() && nodes_fixed < graph.size()) {
     average_heap_size += heap.size();
     // Get the min element from the heap.
     T j = heap.pop();
@@ -499,60 +509,92 @@ void serSP2Algo(Graph& graph, const GNode& source,
       continue;
     }
 
-    // If the min element is not fixed
-    if (!j_data.fixed) {
-      // Set the element to fixed
-      j_data.fixed = true;
-      GNode z = j.src;
+    if (j_data.fixed) {
+      nodes_popped_fixed++;
+      continue;
+    }
 
-      // Inner loop, go through the all the elements in R
-      while(true) {
-        auto& z_data = graph.getData(z);
-        // Get all the vertices that have edges from z
-        for (auto e : edgeRange(z)) {
-          inner_iter++;
-          GNode k = graph.getEdgeDst(e);
-          auto& k_data = graph.getData(k);
-          // If k vertex is not fixed, process the edge between z and k.
-          if (k_data.fixed) continue;
+    // Set the element to fixed
+    j_data.fixed = true;
+    nodes_fixed++;
+    GNode z = j.src;
 
-          auto z_k_dist = graph.getEdgeData(e);
+    // Inner loop, go through the all the elements in R
+    while(true) {
+      auto& z_data = graph.getData(z);
+      // Get all the vertices that have edges from z
+      for (auto e : edgeRange(z)) {
+        inner_iter++;
+        GNode k = graph.getEdgeDst(e);
+        auto& k_data = graph.getData(k);
+        // If k vertex is not fixed, process the edge between z and k.
+        if (k_data.fixed) continue;
 
-          bool changed = false;
-          if (k_data.dist > z_data.dist + z_k_dist) {
-            k_data.dist = z_data.dist + z_k_dist;
-            changed = true;
-          }
+        auto z_k_dist = graph.getEdgeData(e);
 
-          k_data.pred--;
-          if (k_data.pred <= 0 || k_data.dist <= (j_data.dist + k_data.min_in_weight)) {
-            k_data.fixed = true;
-            r_set.push_back(k);
-          } else if (changed) {
-            heap_pushes++;
-            pushWrap(heap, k_data.node, k_data.dist);
-          }
+        bool changed = false;
+        if (k_data.dist > z_data.dist + z_k_dist) {
+          k_data.dist = z_data.dist + z_k_dist;
+          changed = true;
         }
 
-        average_rset_size += r_set.size();
-        middle_iter++;
+        k_data.pred--;
+        if (k_data.pred <= 0 || k_data.dist <= (j_data.dist + k_data.min_in_weight)) {
+          if (k_data.pred > 0) {
+            sp2_condition_applied++;
+            if (false) { // sp2_condition_applied % 776 == 0) {
+              std::cout << (z_k_dist == k_data.min_in_weight ? "Y" : "N")
+                        << "\tz dst:\t" << z_data.dist
+                        << "\tk dst:\t" << k_data.dist
+                        << "\tj dst:\t" << j_data.dist
+                        << "\tz<->j:\t" << (z_data.dist - j_data.dist)
+                        << "\tk<->j:\t" << (k_data.dist - j_data.dist)
+                        << "\tz<->k:\t" << z_k_dist
+                        << "\tkminw:\t" << k_data.min_in_weight
+                        << std::endl;
+            }
+          }
+          else sp1_condition_applied++;
+          k_data.fixed = true;
+          nodes_fixed++;
+          r_set.push_back(k);
+        } else if (changed) {
+          q_set.push_back({&k_data, k_data.dist});
+        }
+      }
 
-        if (r_set.empty()) break;
-        z = r_set.back();
-        r_set.pop_back();
-        additional_nodes_explored++;
+      average_rset_size += r_set.size();
+      middle_iter++;
+
+      if (r_set.empty()) break;
+      z = r_set.back();
+      r_set.pop_back();
+      additional_nodes_explored++;
+    }
+
+    //std::cout << "Qset: " << std::endl;
+    for (auto& element : q_set) {
+      //std::cout << " Node: " << element.first->node << " Dist: " << element.first->dist << " Pushed dist: " << element.second << " Fixed: " << element.first->fixed << std::endl;
+      if (element.first->dist == element.second && !element.first->fixed) {
+        pushWrap(heap, element.first->node, element.first->dist);
+      } else {
+        q_set_for_the_rescue++;
       }
     }
+    q_set.clear();
   }
 
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Outer loop iterations", outer_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Inner loop iterations", inner_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes avoided", duplicates_avoided);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Additional nodes explored", additional_nodes_explored);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Outer loop iterations", outer_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Inner loop iterations", inner_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Heap pushes", heap_pushes);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Duplicated heap pushes", duplicated_items);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Duplicated heap pushes avoided", duplicates_avoided);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Additional nodes explored", additional_nodes_explored);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "SP1 Condition applied", sp1_condition_applied);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "SP2 Condition applied", sp2_condition_applied);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Qset for the rescue", q_set_for_the_rescue);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Average heap size", (average_heap_size * 1.0) / outer_iter);
+  galois::runtime::reportStat_Single("SSSP-serSP2", "Average rset size", (average_rset_size + 1.0) / middle_iter);
 }
 
 template<typename GNode,
