@@ -229,7 +229,7 @@ public:
 
   value_type read() {
      assert(!container.empty());
-     value_type x = container.front();
+     value_type x = top();
      return x;
   }
 

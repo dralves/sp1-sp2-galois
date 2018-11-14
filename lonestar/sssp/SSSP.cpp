@@ -505,7 +505,7 @@ void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap,
 	T j_ch = heap.read();
 	auto& j_ch_data = graph.getData(j_ch.src);
 
-	if( j_ch_data.dist == j_data.dist && j_ch_data.fixed != true ){
+	if( j_ch.dist == j.dist && j_ch_data.fixed != true ){
           j_ch_data.fixed = true;
 	  GNode z_ch = j_ch.src;
 	  r_set.push_back(z_ch);
