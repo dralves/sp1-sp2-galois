@@ -32,8 +32,20 @@
 #include "Lonestar/BoilerPlate.h"
 #include "Lonestar/BFS_SSSP.h"
 
+#include <fstream>
 #include <iostream>
 #include <unordered_set>
+
+
+#ifndef NDEBUG
+#define D(x) x
+#else
+#define D(x)
+#endif
+
+#define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
+#define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
+
 
 namespace cll = llvm::cl;
 
@@ -62,6 +74,7 @@ static cll::opt<unsigned int>
 enum Algo {
   deltaTile = 0,
   deltaStep,
+  deltaStepSP1,
   serDeltaTile,
   serDelta,
   dijkstraTile,
@@ -75,7 +88,7 @@ enum Algo {
   parSP2E
 };
 
-const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep",    "serDeltaTile",
+const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep", "deltaStepSP1", "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
                                   "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E"};
 
@@ -83,6 +96,7 @@ static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
          cll::values(clEnumVal(deltaTile, "deltaTile"),
                      clEnumVal(deltaStep, "deltaStep"),
+                     clEnumVal(deltaStepSP1, "deltaStepSP1"),
                      clEnumVal(serDeltaTile, "serDeltaTile"),
                      clEnumVal(serDelta, "serDelta"),
                      clEnumVal(dijkstraTile, "dijkstraTile"),
@@ -100,6 +114,15 @@ constexpr static const bool TRACK_WORK          = false;
 constexpr static const unsigned CHUNK_SIZE      = 64u;
 constexpr static const ptrdiff_t EDGE_TILE_SIZE = 512;
 
+typedef std::chrono::steady_clock clock_type;
+typedef std::chrono::time_point<clock_type> timestamp;
+
+static timestamp profiling_start;
+
+static std::atomic<uint64_t> fixed_nodes;
+static std::atomic<uint64_t> visited_nodes;
+static std::atomic<uint64_t> explored_nodes;
+
 template<typename GraphTypes>
 struct SerNodeData {
   typename GraphTypes::SerGraphType::GraphNode node;
@@ -108,6 +131,10 @@ struct SerNodeData {
   bool fixed;
   uint32_t min_in_weight;
   SerNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
+
+  inline void visit() {}
+  inline void explore() {}
+  inline void fix() {}
 };
 
 template<typename GraphTypes>
@@ -118,14 +145,112 @@ struct ParNodeData {
   std::atomic<bool> fixed;
   uint32_t min_in_weight;
   ParNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
+
+  inline void visit() {}
+  inline void explore() {}
+  inline void fix() {}
 };
 
+template<typename GraphTypes>
+struct ProfilingNodeData {
+  typename GraphTypes::ParGraphType::GraphNode node;
+  std::atomic<int> pred;
+  std::atomic<uint32_t> dist;
+  std::atomic<bool> fixed;
+  uint32_t min_in_weight;
+
+  std::atomic<uint64_t> num_visits;
+  std::atomic<uint64_t> first_visit_usec;
+  std::atomic<uint64_t> first_visit_idx;
+  std::atomic<uint64_t> last_visit_usec;
+  std::atomic<uint64_t> visits_after_fixed;
+  std::atomic<uint64_t> visits_after_explored;
+  std::atomic<uint64_t> first_explored_usec;
+  std::atomic<uint64_t> first_explored_idx;
+  std::atomic<uint64_t> num_explores;
+  std::atomic<uint64_t> fixed_usec;
+  std::atomic<uint64_t> fixed_idx;
+
+
+  ProfilingNodeData(): node(-1),
+                       pred(0),
+                       dist(0),
+                       fixed(false),
+                       num_visits(0),
+                       first_visit_usec(0),
+                       first_visit_idx(0),
+                       last_visit_usec(0),
+                       visits_after_fixed(0),
+                       visits_after_explored(0),
+                       first_explored_usec(0),
+                       first_explored_idx(0),
+                       num_explores(0),
+                       fixed_usec(0),
+                       fixed_idx(0) {}
+
+  inline void explore() {
+    num_explores++;
+    if (first_explored_usec == 0) {
+      timestamp now = clock_type::now();
+      first_explored_usec = (now - profiling_start).count();
+      first_explored_idx = explored_nodes++;
+    }
+  }
+
+  inline void fix() {
+    timestamp now = clock_type::now();
+    fixed = true;
+    fixed_usec = (now - profiling_start).count();
+    fixed_idx = fixed_nodes++;
+  }
+
+  inline void visit() {
+    if (num_visits == 0) {
+      timestamp now = clock_type::now();
+      first_visit_usec = (now - profiling_start).count();
+      first_visit_idx = visited_nodes++;
+    }
+    num_visits++;
+    if (num_explores > 0) {
+      visits_after_explored++;
+    }
+    if (fixed) {
+      timestamp now = clock_type::now();
+      visits_after_fixed++;
+      last_visit_usec = (now - profiling_start).count();
+    }
+  }
+};
+
+
+struct EdgeData {
+  EdgeData(uint32_t dist_) : dist(dist_) {}
+  uint32_t dist;
+};
+
+// Edge data to use for profiling purposes
+struct ProfilingEdgeData {
+  uint32_t dist;
+  ProfilingEdgeData(uint32_t dist_) : dist(dist_) {}
+};
+
+// struct GraphTypes {
+//   typedef SerNodeData<GraphTypes> SerNodeDataType;
+//   typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::SerNodeDataType, uint32_t>::
+//   with_no_lockable<true>::type ::with_numa_alloc<true>::type SerGraphType;
+//   typedef ParNodeData<GraphTypes> ParNodeDataType;
+//   typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::ParNodeDataType, uint32_t>::
+//   with_no_lockable<true>::type ::with_numa_alloc<true>::type ParGraphType;
+// };
+
+
+// PROFILING GRAPH TYPES
 struct GraphTypes {
-  typedef SerNodeData<GraphTypes> SerNodeDataType;
-  typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::SerNodeDataType, uint32_t>::
+  typedef ProfilingNodeData<GraphTypes> SerNodeDataType;
+  typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::SerNodeDataType, ProfilingEdgeData, false, false, false, uint32_t>::
   with_no_lockable<true>::type ::with_numa_alloc<true>::type SerGraphType;
-  typedef ParNodeData<GraphTypes> ParNodeDataType;
-  typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::ParNodeDataType, uint32_t>::
+  typedef ProfilingNodeData<GraphTypes> ParNodeDataType;
+  typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::ParNodeDataType, ProfilingEdgeData, false, false, false, uint32_t>::
   with_no_lockable<true>::type ::with_numa_alloc<true>::type ParGraphType;
 };
 
@@ -196,7 +321,7 @@ void deltaStepAlgo(Graph& graph,
 
                        GNode dst          = graph.getEdgeDst(ii);
                        auto& ddist        = graph.getData(dst, flag);
-                       Dist ew            = graph.getEdgeData(ii, flag);
+                       Dist ew            = graph.getEdgeData(ii, flag).dist;
                        const Dist newDist = sdata.dist + ew;
 
 
@@ -236,6 +361,7 @@ void deltaStepAlgo(Graph& graph,
   }
 }
 
+
 template <typename GType,
           typename T,
           typename P,
@@ -273,7 +399,7 @@ void serDeltaAlgo(Graph& graph, const GNode& source,
         GNode dst   = graph.getEdgeDst(e);
         auto& ddata = graph.getData(dst);
 
-        const auto newDist = item.dist + graph.getEdgeData(e);
+        const auto newDist = item.dist + graph.getEdgeData(e).dist;
 
         if (newDist < ddata.dist) {
           ddata.dist = newDist;
@@ -297,13 +423,21 @@ template <typename GType,
           typename R,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
+          typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
 void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
                   const R& edgeRange) {
 
+  galois::Timer timer;
+  timer.start();
+
   using WL = galois::MinHeap<T>;
 
   graph.getData(source).dist = 0;
+
+  profiling_start = clock_type::now();
+  explored_nodes = 0;
+  fixed_nodes = 0;
 
   WL wl;
   pushWrap(wl, source, 0);
@@ -320,18 +454,23 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
     T item = wl.pop();
 
-    if (graph.getData(item.src).dist < item.dist) {
+    auto& item_data = graph.getData(item.src);
+    if (item_data.dist < item.dist) {
       duplicated_items++;
       continue;
     }
+
+    item_data.fix();
+    item_data.explore();
 
     for (auto e : edgeRange(item)) {
 
       inner_iter++;
       GNode dst   = graph.getEdgeDst(e);
       auto& ddata = graph.getData(dst);
+      ddata.visit();
 
-      const auto newDist = item.dist + graph.getEdgeData(e);
+      const auto newDist = item.dist + graph.getEdgeData(e).dist;
 
       if (newDist < ddata.dist) {
         ddata.dist = newDist;
@@ -348,14 +487,138 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
 }
 
-template<typename Graph, typename R>
-void calc_graph_predecessors(Graph& graph, R& edgeRange) {
+
+// template <typename GType,
+//           typename T,
+//           typename P,
+//           typename R,
+//           typename Graph = typename GType::Graph,
+//           typename GNode = typename GType::GNode,
+//           typename GNodeData = typename GType::Graph::node_data_type,
+//           typename Traits = typename GType::Traits>
+// void deltaStepAlgoSP1(Graph& graph,
+//                       GNode source,
+//                       const P& pushWrap,
+//                       const R& edgeRange) {
+
+//   using Dist                 = typename Traits::Dist;
+//   using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
+
+//   //! [reducible for self-defined stats]
+//   galois::GAccumulator<size_t> BadWork;
+//   //! [reducible for self-defined stats]
+//   galois::GAccumulator<size_t> WLEmptyWork;
+
+//   namespace gwl = galois::worklists;
+
+//   using PSchunk = gwl::PerSocketChunkFIFO<CHUNK_SIZE>;
+//   using OBIM = galois::worklists::OrderedByIntegerMetric<UpdateRequestIndexer, PSchunk>;
+
+//   auto& sdata = graph.getData(source);
+//   sdata.dist = 0;
+//   sdata.fixed = true;
+
+//   std::atomic<Dist> min(0);
+
+//   galois::InsertBag<T> initBag;
+//   pushWrap(initBag, source, 0, "parallel");
+
+//   galois::for_each(galois::iterate(initBag),
+//                    [&](const T& item, auto& ctx) {
+//                      constexpr galois::MethodFlag flag =
+//                          galois::MethodFlag::UNPROTECTED;
+//                      auto& sdata = graph.getData(item.src, flag);
+
+//                      if (sdata.dist < item.dist || (sdata.fixed && sdata.explored)) {
+//                        if (TRACK_WORK) WLEmptyWork += 1;
+//                        return;
+//                      }
+
+//                      thread_local std::vector<GNodeData*> r_set(100);
+//                      r_set.push_back(&sdata);
+
+//                      while (!r_set.empty()) {
+//                        auto elem = r_set.back();
+//                        r_set.pop_back();
+
+//                        for (auto ii : edgeRange(elem)) {
+
+//                          GNode dst = graph.getEdgeDst(ii);
+//                          auto& ddist = graph.getData(dst, flag);
+//                          Dist ew = graph.getEdgeData(ii, flag);
+//                          const Dist newDist = elem.dist + ew;
+
+//                          if (ddist.fixed) continue;
+
+//                          bool changed = false;
+//                          while (true) {
+//                            Dist oldDist = ddist.dist;
+
+//                            if (oldDist <= newDist) break;
+
+//                            if (ddist.dist.compare_exchange_weak(
+//                                    oldDist, newDist, std::memory_order_relaxed)) {
+//                              changed = true;
+//                              break;
+//                            }
+//                          }
+
+//                          if (elem.fixed && --ddist.pred <= 0) {
+//                            ddist.fixed = true;
+//                            if (changed) {
+//                              r_set.push_back(ddist);
+//                              continue;
+//                            }
+//                          }
+
+//                          if (changed) {
+//                            pushWrap(ctx, dst, newDist);
+//                          }
+//                        }
+
+//                        if (sdata.fixed) sdata.explored = true;
+//                      }
+
+//                    },
+//                    galois::wl<OBIM>(UpdateRequestIndexer{stepShift}),
+//                    galois::no_conflicts(), galois::loopname("SSSP"));
+
+//   if (TRACK_WORK) {
+//     //! [report self-defined stats]
+//     galois::runtime::reportStat_Single("SSSP", "BadWork", BadWork.reduce());
+//     //! [report self-defined stats]
+//     galois::runtime::reportStat_Single("SSSP", "WLEmptyWork",
+//                                        WLEmptyWork.reduce());
+//   }
+// }
+
+namespace detail{
+template<typename GType, typename Edge>
+struct EdgeDist {
+  auto operator()(typename GType::Graph& graph,
+                  typename GType::Graph::edge_iterator& edge) {
+    return graph.getEdgeData(edge);
+  }
+};
+
+template<typename GType>
+struct EdgeDist<GType, ProfilingEdgeData> {
+  auto operator()(typename GType::Graph& graph,
+                  typename GType::Graph::edge_iterator& edge) {
+    return graph.getEdgeData(edge).dist;
+  }
+};
+}
+
+template<typename GType, typename R>
+void calc_graph_predecessors(typename GType::Graph& graph, R& edgeRange) {
+  detail::EdgeDist<GType, typename GType::Graph::edge_data_type> edgeDist;
   // Fill the pred array
   for (auto vertex : graph) {
     for (auto edge : edgeRange(vertex)) {
       auto& k_data = graph.getData(graph.getEdgeDst(edge));
       k_data.pred++;
-      k_data.min_in_weight = std::min(k_data.min_in_weight, graph.getEdgeData(edge));
+      k_data.min_in_weight = std::min(k_data.min_in_weight, edgeDist(graph, edge));
     }
   }
 }
@@ -405,7 +668,8 @@ void serSP1Algo(Graph& graph, const GNode& source,
     // If the min element is not fixed
     if (!j_data.fixed) {
       // Set the element to fixed
-      j_data.fixed = true;
+      j_data.fix();
+      j_data.explore();
       GNode z = j.src;
 
       // Inner loop, go through the all the elements in R
@@ -416,12 +680,13 @@ void serSP1Algo(Graph& graph, const GNode& source,
           inner_iter++;
           GNode k = graph.getEdgeDst(e);
           auto& k_data = graph.getData(k);
+          k_data.visit();
           // If k vertex is not fixed, process the edge between z and k.
           if (!k_data.fixed) {
-            auto z_k_dist = graph.getEdgeData(e);
+            auto z_k_dist = graph.getEdgeData(e).dist;
             k_data.pred--;
             if (k_data.pred <= 0) {
-              k_data.fixed = true;
+              k_data.fix();
               r_set.push_back(k);
             }
 
@@ -456,15 +721,6 @@ void serSP1Algo(Graph& graph, const GNode& source,
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
 }
 
-#ifdef DEBUG
-#define D(x) x
-#else
-#define D(x)
-#endif
-
-#define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
-#define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
-
 template <typename GType,
           typename T,
           typename P,
@@ -478,48 +734,32 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
   using Heap = galois::MinHeap<T>;
   using Dist = typename Traits::Dist;
-
-  Heap heap;
-  pushWrap(heap, source, 0);
-
   // The set of nodes which have been fixed but not explored
 
-  size_t outer_iter = 0;
-  size_t sp2_condition_applied = 0;
-  size_t sp1_condition_applied = 0;
-  size_t off_heap_mins_found = 0;
-  size_t q_set_for_the_rescue = 0;
-  size_t nodes_popped_fixed = 0;
   size_t nodes_fixed = 0;
-  size_t middle_iter = 0;
-  size_t additional_nodes_explored = 0;
-  size_t inner_iter = 0;
-  size_t heap_pushes = 0;
-  size_t average_heap_size = 0;
-  size_t average_rset_size = 0;
-  size_t duplicated_items = 0;
-  size_t same_weight_pops = 0;
-
 
   galois::gstl::Vector<GNodeData*> r_set;
   r_set.reserve(100);
   std::vector<std::pair<GNodeData*, Dist>> q_set;
   q_set.reserve(100);
 
+  profiling_start = clock_type::now();
+  explored_nodes = 0;
+  fixed_nodes = 0;
+
+  Heap heap;
+  pushWrap(heap, source, 0);
+
   GNodeData* min = nullptr;
 
   // While the heap is not empty
-  while (UNLIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set.empty())) {
-    D(average_heap_size += heap.size(););
-    D(outer_iter++;);
+  while (LIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set.empty())) {
 
-    if (UNLIKELY(!heap.empty())) {
+    if (LIKELY(!heap.empty())) {
       T item = heap.top();
       GNodeData* item_data = &graph.getData(item.src);
 
       if (item_data->fixed || item_data->dist < item.dist) {
-        D(if (item_data->fixed) nodes_popped_fixed++;);
-        D(if (item_data->dist < item.dist) duplicated_items++;);
         heap.pop();
         // If we got a min, go do some work.
         if (!r_set.empty()) goto mainloop;
@@ -528,13 +768,11 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
       heap.pop();
       min = item_data;
-      min->fixed = true;
-      nodes_fixed++;
+      min->fix();
       r_set.push_back(min);
     }
 
-    if (UNLIKELY(!heap.empty()) && heap.top().dist == min->dist) {
-      D(same_weight_pops++;)
+    if (LIKELY(!heap.empty()) && heap.top().dist == min->dist) {
       continue;
     }
 
@@ -543,15 +781,15 @@ void serSP2Algo(Graph& graph, const GNode& source,
     while(r_set.size() > 0) {
       GNodeData* z = r_set.back();
       r_set.pop_back();
+      z->explore();
 
       // Get all the vertices that have edges from z
       for (auto e : edgeRange(z->node)) {
-        D(inner_iter++;);
         auto k = &graph.getData(graph.getEdgeDst(e));
+        k->visit();
         // If k vertex is not fixed, process the edge between z and k.
         if (k->fixed) continue;
-
-        auto z_k_dist = graph.getEdgeData(e);
+        auto z_k_dist = graph.getEdgeData(e).dist;
 
         bool changed = false;
         if (k->dist > z->dist + z_k_dist) {
@@ -561,51 +799,29 @@ void serSP2Algo(Graph& graph, const GNode& source,
         }
 
         if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
-          k->fixed = true;
-          nodes_fixed++;
+          k->fix();
           r_set.push_back(k);
         } else if (changed) {
           q_set.push_back({k, k->dist});
         }
       }
 
-      average_rset_size += r_set.size();
-      D(middle_iter++;);
-
       if (r_set.empty() && !min->fixed && min->dist <= heap.top().dist) {
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
-        min->fixed = true;
+        min->fix();
         r_set.push_back(min);
-        nodes_fixed++;
-        D(off_heap_mins_found++;);
       }
-      D(additional_nodes_explored++;);
     }
 
-    //std::cout << "Qset: " << std::endl;
     for (auto& item : q_set) {
-      //std::cout << " Node: " << element.first->node << " Dist: " << element.first->dist << " Pushed dist: " << element.second << " Fixed: " << element.first->fixed << std::endl;
       if (item.first->dist == item.second && !item.first->fixed) {
         pushWrap(heap, item.first->node, item.first->dist);
-      } D(else {q_set_for_the_rescue++;});
+      }
     }
     q_set.clear();
   }
-
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Outer loop iterations", outer_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Inner loop iterations", inner_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Duplicated heap pushes", duplicated_items);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Additional nodes explored", additional_nodes_explored);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "SP1 Condition applied", sp1_condition_applied);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "SP2 Condition applied", sp2_condition_applied);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Off heap mins found", off_heap_mins_found);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Same weight pops", same_weight_pops);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Qset for the rescue", q_set_for_the_rescue);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Average heap size", (average_heap_size * 1.0) / outer_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP2", "Average rset size", (average_rset_size + 1.0) / middle_iter);
 }
 
 template<typename GNode,
@@ -668,8 +884,8 @@ void parSP1Algo(Graph& graph,
     // correct (if we change k because z is closer, then if
     // z get even closer it's still valid to change k)
     const auto& z_data = graph.getData(z_edge.first, flag);
-    auto z_k_dist = graph.getEdgeData(z_edge.second, flag);
-    Dist new_dist = z_data.dist + z_k_dist;
+    auto z_k_data = graph.getEdgeData(z_edge.second, flag);
+    Dist new_dist = z_data.dist + z_k_data.dist;
 
     while (true) {
       Dist old_dist = k_data.dist;
@@ -760,9 +976,9 @@ void parSP2VerticesAlgo(Graph& graph,
 
                        if (k_data.fixed) continue;
 
-                       auto z_k_dist = graph.getEdgeData(z_edge, flag);
+                       auto z_k_data = graph.getEdgeData(z_edge, flag);
                        Dist k_dist = k_data.dist;
-                       Dist new_k_dist = z_data.dist + z_k_dist;
+                       Dist new_k_dist = z_data.dist + z_k_data.dist;
                        bool changed = false;
 
                        do {
@@ -859,7 +1075,7 @@ void parSP2EdgesAlgo(Graph& graph,
   std::vector<WorkItem> initial;
   for (const auto& e: edgeRange(source)) {
     ++r_set_counter;
-    initial.push_back(WorkItem{source, graph.getEdgeData(e), graph.getEdgeDst(e)});
+    initial.push_back(WorkItem{source, graph.getEdgeData(e).dist, graph.getEdgeDst(e)});
   }
 
   galois::for_each(galois::iterate(initial),
@@ -888,7 +1104,7 @@ void parSP2EdgesAlgo(Graph& graph,
                          k_data.fixed = true;
                          for (auto& e: edgeRange(z_item.dst)) {
                            ++r_set_counter;
-                           ctx.push_back(WorkItem{z_item.dst, graph.getEdgeData(e, flag), graph.getEdgeDst(e)});
+                           ctx.push_back(WorkItem{z_item.dst, graph.getEdgeData(e, flag).dist, graph.getEdgeDst(e)});
                          }
                        } else if (changed){
                          pushWrap(heap, z_item.dst, k_data.dist);
@@ -915,7 +1131,7 @@ void parSP2EdgesAlgo(Graph& graph,
                            pushed_item = true;
                            for (auto& e: edgeRange(j.src)) {
                              ++r_set_counter;
-                             ctx.push_back(WorkItem{j.src, graph.getEdgeData(e, flag), graph.getEdgeDst(e)});
+                             ctx.push_back(WorkItem{j.src, graph.getEdgeData(e, flag).dist, graph.getEdgeDst(e)});
                            }
                          // Push all elements with the same weights
                          } else if (j_data.dist == min_dist) {
@@ -923,7 +1139,7 @@ void parSP2EdgesAlgo(Graph& graph,
                            j_data.fixed = true;
                            for (auto& e: edgeRange(j.src)) {
                              ++r_set_counter;
-                             ctx.push_back(WorkItem{j.src, graph.getEdgeData(e, flag), graph.getEdgeDst(e)});
+                             ctx.push_back(WorkItem{j.src, graph.getEdgeData(e, flag).dist, graph.getEdgeDst(e)});
                            }
                          } else break;
                        }
@@ -970,7 +1186,7 @@ void topoAlgo(Graph& graph, const GNode& source) {
                        changed.update(true);
 
                        for (auto e : graph.edges(n)) {
-                         const auto newDist = sdata.dist + graph.getEdgeData(e);
+                         const auto newDist = sdata.dist + graph.getEdgeData(e).dist;
                          auto dst           = graph.getEdgeDst(e);
                          auto& ddata        = graph.getData(dst);
                          galois::atomicMin(ddata.dist, newDist);
@@ -1023,7 +1239,7 @@ void topoTileAlgo(Graph& graph, const GNode& source) {
                        changed.update(true);
 
                        for (auto e = t.beg; e != t.end; ++e) {
-                         const auto newDist = sdata.dist + graph.getEdgeData(e);
+                         const auto newDist = sdata.dist + graph.getEdgeData(e).dist;
                          auto dst           = graph.getEdgeDst(e);
                          auto& ddata        = graph.getData(dst);
                          galois::atomicMin(ddata.dist, newDist);
@@ -1088,13 +1304,45 @@ void init_graph(Graph& graph, GNode& source, GNode& report) {
                  });
 
   graph.getData(source).dist = 0;
+
+  profiling_start = clock_type::now();
+  explored_nodes = 0;
+  fixed_nodes = 0;
+}
+
+struct MatchPathSeparator
+{
+    bool operator()( char ch ) const
+    {
+        return ch == '/';
+    }
+};
+
+std::string
+basename( std::string const& pathname )
+{
+    return std::string(
+        std::find_if( pathname.rbegin(), pathname.rend(),
+                      MatchPathSeparator() ).base(),
+        pathname.end() );
+}
+
+std::string
+removeExtension( std::string const& filename )
+{
+    std::string::const_reverse_iterator
+                        pivot
+            = std::find( filename.rbegin(), filename.rend(), '.' );
+    return pivot == filename.rend()
+        ? filename
+        : std::string( filename.begin(), pivot.base() - 1 );
 }
 
 template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
-void verify_and_report(Graph& graph, GNode& source, GNode& report) {
+void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string algo_name) {
   galois::reportPageAlloc("MeminfoPost");
 
   std::cout << "Node " << reportNode << " has distance "
@@ -1107,6 +1355,30 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report) {
       GALOIS_DIE("Verification failed");
     }
   }
+
+  std::string graph_name = removeExtension(basename(filename));
+
+  std::string prof_filename = "per_node_profile_" + algo_name + "_" + graph_name + ".csv";
+
+  std::cout << "Outputting profile to file: " << prof_filename;
+
+  // For profiling graphs, output the metrics in csv form
+  std::ofstream profile;
+  profile.open(prof_filename);
+  profile << "node_idx;pred;dist;fixed;min_in_weight;num_visits;first_visit_usec;first_visit_idx";
+  profile << "last_visit_usec;visits_after_fixed;visits_after_explored;first_explored_usec;first_explored_idx;";
+  profile << "num_explores;fixed_usec;fixed_idx;" << std::endl;
+
+  for (auto& node : graph) {
+    auto& d = graph.getData(node);
+    profile << d.node << ";" << d.pred << ";" << d.dist << ";" << d.fixed << ";" << d.min_in_weight;
+    profile << d.num_visits << ";" << d.first_visit_usec << ";" << d.first_visit_idx << ";";
+    profile << d.last_visit_usec << ";" << d.visits_after_fixed << ";" << d.visits_after_explored << ";";
+    profile << d.first_explored_usec << ";" << d.first_explored_idx << ";";
+    profile << d.num_explores << ";" << d.fixed_usec << ";" << d.fixed_idx << ";" << std::endl;
+  }
+
+  profile.close();
 }
 
 int main(int argc, char** argv) {
@@ -1132,24 +1404,43 @@ int main(int argc, char** argv) {
           ParGType::Traits::TileRangeFn());
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case deltaStep: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors<ParGType>(graph, edgeRange);
 
       Tmain.start();
       deltaStepAlgo<ParGType, ParGType::Traits::UpdateRequest>(
           graph, source,
           ParGType::Traits::ReqPushWrap(),
-          ParGType::Traits::OutEdgeRangeFn{graph});
+          edgeRange);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
+    // case deltaStepSP1: {
+    //   ParGType::Graph graph;
+    //   ParGType::GNode source, report;
+    //   init_graph<ParGType>(graph, source, report);
+    //   auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+    //   calc_graph_predecessors<ParGType>(graph, edgeRange);
+
+    //   Tmain.start();
+    //   deltaStepAlgoSP1<ParGType, ParGType::Traits::UpdateRequest>(
+    //       graph, source,
+    //       ParGType::Traits::ReqPushWrap(),
+    //       edgeRange);
+    //   Tmain.stop();
+
+    //   verify_and_report<ParGType>(graph, source, report);
+    //   break;
+    // }
     case serDeltaTile: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
@@ -1162,7 +1453,7 @@ int main(int argc, char** argv) {
           SerGType::Traits::TileRangeFn());
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case serDelta: {
@@ -1177,7 +1468,7 @@ int main(int argc, char** argv) {
           SerGType::Traits::OutEdgeRangeFn{graph});
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case dijkstraTile: {
@@ -1192,7 +1483,7 @@ int main(int argc, char** argv) {
           SerGType::Traits::TileRangeFn());
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case dijkstra: {
@@ -1207,7 +1498,7 @@ int main(int argc, char** argv) {
           SerGType::Traits::OutEdgeRangeFn{graph});
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case topo: {
@@ -1219,7 +1510,7 @@ int main(int argc, char** argv) {
       topoAlgo<ParGType>(graph, source);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case topoTile: {
@@ -1231,7 +1522,7 @@ int main(int argc, char** argv) {
       topoTileAlgo<ParGType>(graph, source);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case serSP1: {
@@ -1239,7 +1530,7 @@ int main(int argc, char** argv) {
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
       auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors(graph, edgeRange);
+      calc_graph_predecessors<SerGType>(graph, edgeRange);
 
       Tmain.start();
       serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
@@ -1248,24 +1539,24 @@ int main(int argc, char** argv) {
           edgeRange);
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case serSP2: {
-      SerGType::Graph graph;
-      SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
-      auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors(graph, edgeRange);
+      using GType = SerGType;
+      GType::Graph graph;
+      GType::GNode source, report;
+      init_graph<GType>(graph, source, report);
+      auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors<GType>(graph, edgeRange);
 
       Tmain.start();
-      serSP2Algo<SerGType, SerGType::Traits::UpdateRequest>(
+      serSP2Algo<GType, GType::Traits::UpdateRequest>(
           graph, source,
-          SerGType::Traits::ReqPushWrap(),
+          GType::Traits::ReqPushWrap(),
           edgeRange);
       Tmain.stop();
-
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<GType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case parSP1: {
@@ -1273,7 +1564,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
       auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors(graph, edgeRange);
+      calc_graph_predecessors<ParGType>(graph, edgeRange);
 
       Tmain.start();
       parSP1Algo<ParGType, ParGType::Traits::UpdateRequest>(
@@ -1282,7 +1573,7 @@ int main(int argc, char** argv) {
           edgeRange);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case parSP2V: {
@@ -1290,7 +1581,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
       auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors(graph, edgeRange);
+      calc_graph_predecessors<ParGType>(graph, edgeRange);
 
       Tmain.start();
       parSP2VerticesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
@@ -1299,7 +1590,7 @@ int main(int argc, char** argv) {
           edgeRange);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     case parSP2E: {
@@ -1307,7 +1598,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
       auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors(graph, edgeRange);
+      calc_graph_predecessors<ParGType>(graph, edgeRange);
 
       Tmain.start();
       parSP2EdgesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
@@ -1316,11 +1607,12 @@ int main(int argc, char** argv) {
           edgeRange);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
       break;
     }
     default:
       std::abort();
   }
+
   return 0;
 }

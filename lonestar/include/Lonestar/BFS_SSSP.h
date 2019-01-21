@@ -196,7 +196,7 @@ struct BFS_SSSP {
     template <bool useWt, typename iiTy>
     Dist getEdgeWeight(iiTy ii,
                        typename std::enable_if<useWt>::type* = nullptr) const {
-      return g.getEdgeData(ii);
+      return g.getEdgeData(ii).dist;
     }
 
     void operator()(typename Graph::GraphNode node) const {
@@ -232,6 +232,9 @@ struct BFS_SSSP {
       m.update(d);
     }
   };
+
+  //  template<typename GNodeData = typename Graph::node_data_type>
+  //  Dist get_node_dist(Graph& graph, GNode node);
 
   static bool verify(Graph& graph, GNode source) {
     if (graph.getData(source).dist != 0) {
