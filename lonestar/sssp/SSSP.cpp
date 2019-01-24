@@ -170,6 +170,7 @@ struct ProfilingNodeData {
   std::atomic<uint64_t> num_explores;
   std::atomic<uint64_t> fixed_usec;
   std::atomic<uint64_t> fixed_idx;
+  std::atomic<bool> fixed_from_rset;
 
 
   ProfilingNodeData(): node(-1),
@@ -186,7 +187,8 @@ struct ProfilingNodeData {
                        first_explored_idx(0),
                        num_explores(0),
                        fixed_usec(0),
-                       fixed_idx(0) {}
+                       fixed_idx(0),
+                       fixed_from_rset(false) {}
 
   inline void explore() {
     num_explores++;
@@ -197,11 +199,13 @@ struct ProfilingNodeData {
     }
   }
 
-  inline void fix() {
+  inline void fix(bool fixed_from_rset_ = false) {
+    if (fixed) return;
     timestamp now = clock_type::now();
     fixed = true;
     fixed_usec = (now - profiling_start).count();
     fixed_idx = fixed_nodes++;
+    fixed_from_rset =  fixed_from_rset_;
   }
 
   inline void visit() {
@@ -818,7 +822,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         }
 
         if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
-          k->fix();
+          k->fix(true);
           r_set.push_back(k);
         } else if (changed) {
           q_set.push_back({k, k->dist});
@@ -1390,11 +1394,13 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
 
   for (auto& node : graph) {
     auto& d = graph.getData(node);
+    if (d.dist == 2147483646) continue;
     profile << d.node << ";" << d.pred << ";" << d.dist << ";" << d.fixed << ";" << d.min_in_weight;
     profile << d.num_visits << ";" << d.first_visit_usec << ";" << d.first_visit_idx << ";";
     profile << d.last_visit_usec << ";" << d.visits_after_fixed << ";" << d.visits_after_explored << ";";
     profile << d.first_explored_usec << ";" << d.first_explored_idx << ";";
-    profile << d.num_explores << ";" << d.fixed_usec << ";" << d.fixed_idx << ";" << std::endl;
+    profile << d.num_explores << ";" << d.fixed_usec << ";" << d.fixed_idx << ";";
+    profile << d.fixed_from_rset << ";" << std::endl;
   }
 
   profile.close();
