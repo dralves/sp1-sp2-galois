@@ -269,6 +269,82 @@ public:
   void reserve(size_type s) { container.reserve(s); }
 };
 
+template <typename T, typename GC, typename Cmp = std::less<T>,
+          typename Cont = std::vector<T, runtime::Pow_2_BlockAllocator<T>>>
+class GarbageCollectingMinHeap {
+public:
+  typedef runtime::Pow_2_BlockAllocator<T> alloc_type;
+  typedef Cont container_type;
+
+  typedef typename container_type::value_type value_type;
+  typedef typename container_type::reference reference;
+  typedef typename container_type::const_reference const_reference;
+  typedef typename container_type::pointer pointer;
+  typedef typename container_type::size_type size_type;
+  typedef typename container_type::const_iterator iterator;
+  typedef typename container_type::const_iterator const_iterator;
+  typedef typename container_type::const_reverse_iterator reverse_iterator;
+  typedef typename container_type::const_reverse_iterator const_reverse_iterator;
+
+protected:
+  struct RevCmp {
+    Cmp cmp;
+
+    explicit RevCmp(const Cmp& cmp) : cmp(cmp) {}
+
+    bool operator()(const T& left, const T& right) const {
+      return cmp(right, left);
+    }
+  };
+
+  const GC& gc;
+  Cont container;
+  RevCmp revCmp;
+
+public:
+  explicit GarbageCollectingMinHeap(const GC& garbage_collector, const Cmp& cmp = Cmp(), const Cont& container = Cont())
+      : gc(garbage_collector), container(container), revCmp(cmp) {}
+
+  bool empty() const { return container.empty(); }
+
+  size_type size() const { return container.size(); }
+
+  const_reference top() const { return container.front(); }
+
+  // for compatibility with various stl types
+  inline void push_back(const value_type& x) { this->push(x); }
+  inline void insert(const value_type& x) { this->push(x); }
+
+  void push(const value_type& x) {
+    while(!container.empty() && gc(container.back())) {
+      container.pop_back();
+    }
+
+    container.push_back(x);
+    std::push_heap(container.begin(), container.end(), revCmp);
+  }
+
+  void pop() {
+
+    while(!container.empty() && gc(container.back())) {
+      container.pop_back();
+    }
+
+    if (container.empty()) return;
+
+    std::pop_heap(container.begin(), container.end(), revCmp);
+    container.pop_back();
+  }
+
+  void clear() { container.clear(); }
+
+  const_iterator begin() const { return container.begin(); }
+  const_iterator end() const { return container.end(); }
+
+  void reserve(size_type s) { container.reserve(s); }
+};
+
+
 /**
  * Thread-safe min heap.
  */

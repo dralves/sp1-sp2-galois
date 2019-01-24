@@ -275,6 +275,16 @@ struct GraphType {
   typedef GraphTypeTraits<GType> Traits;
 };
 
+
+template<typename Graph, typename HeapEntryType, typename NodeDataType>
+struct GarbageCollectFixedNodes {
+  GarbageCollectFixedNodes(Graph& graph_) : graph(graph_) {}
+  Graph& graph;
+  inline bool operator()(HeapEntryType& item) const {
+    return graph.getData(item.src).fixed;
+  }
+};
+
 template <typename GType,
           typename T,
           typename P,
@@ -391,11 +401,10 @@ void serDeltaAlgo(Graph& graph, const GNode& source,
 
       if (graph.getData(item.src).dist < item.dist) {
         // empty work
-        continue;
+       continue;
       }
 
       for (auto e : edgeRange(item)) {
-
         GNode dst   = graph.getEdgeDst(e);
         auto& ddata = graph.getData(dst);
 
@@ -431,7 +440,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::Timer timer;
   timer.start();
 
-  using WL = galois::MinHeap<T>;
+  //using WL = galois::MinHeap<T>;
+  using WL = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
 
   graph.getData(source).dist = 0;
 
@@ -439,7 +449,10 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   explored_nodes = 0;
   fixed_nodes = 0;
 
-  WL wl;
+
+  GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
+  WL wl(gc);
+
   pushWrap(wl, source, 0);
 
   size_t iter = 0;
@@ -452,7 +465,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
     ++iter;
     average_heap_size += wl.size();
 
-    T item = wl.pop();
+    T item = wl.top();
+    wl.pop();
 
     auto& item_data = graph.getData(item.src);
     if (item_data.dist < item.dist) {
@@ -732,7 +746,10 @@ template <typename GType,
 void serSP2Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange) {
 
-  using Heap = galois::MinHeap<T>;
+  //using Heap = galois::MinHeap<T>;
+
+  using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
+
   using Dist = typename Traits::Dist;
   // The set of nodes which have been fixed but not explored
 
@@ -747,7 +764,9 @@ void serSP2Algo(Graph& graph, const GNode& source,
   explored_nodes = 0;
   fixed_nodes = 0;
 
-  Heap heap;
+  GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
+
+  Heap heap(gc);
   pushWrap(heap, source, 0);
 
   GNodeData* min = nullptr;
