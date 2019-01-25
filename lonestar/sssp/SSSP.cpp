@@ -123,6 +123,16 @@ static std::atomic<uint64_t> fixed_nodes;
 static std::atomic<uint64_t> visited_nodes;
 static std::atomic<uint64_t> explored_nodes;
 
+enum VertexSource {
+  R_SET,
+  HEAP
+};
+
+struct VertexContext {
+  VertexSource vertex_source;
+  size_t set_size;
+};
+
 template<typename GraphTypes>
 struct SerNodeData {
   typename GraphTypes::SerGraphType::GraphNode node;
@@ -133,8 +143,8 @@ struct SerNodeData {
   SerNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
 
   inline void visit() {}
-  inline void explore() {}
-  inline void fix() {}
+  inline void explore(VertexContext context = VertexContext()) {}
+  inline void fix(VertexContext context = VertexContext()) {}
 };
 
 template<typename GraphTypes>
@@ -147,9 +157,11 @@ struct ParNodeData {
   ParNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
 
   inline void visit() {}
-  inline void explore() {}
-  inline void fix() {}
+  inline void explore(VertexContext context = VertexContext()) {}
+  inline void fix(VertexContext context = VertexContext()) {}
 };
+
+constexpr static const uint32_t DIST_INF = std::numeric_limits<uint32_t>::max() / 2 - 1;
 
 template<typename GraphTypes>
 struct ProfilingNodeData {
@@ -158,6 +170,7 @@ struct ProfilingNodeData {
   std::atomic<uint32_t> dist;
   std::atomic<bool> fixed;
   uint32_t min_in_weight;
+  uint32_t min_out_weight;
 
   std::atomic<uint64_t> num_visits;
   std::atomic<uint64_t> first_visit_usec;
@@ -170,42 +183,31 @@ struct ProfilingNodeData {
   std::atomic<uint64_t> num_explores;
   std::atomic<uint64_t> fixed_usec;
   std::atomic<uint64_t> fixed_idx;
-  std::atomic<bool> fixed_from_rset;
+  VertexContext ctx_explored;
+  VertexContext ctx_fixed;
 
 
-  ProfilingNodeData(): node(-1),
-                       pred(0),
-                       dist(0),
-                       fixed(false),
-                       num_visits(0),
-                       first_visit_usec(0),
-                       first_visit_idx(0),
-                       last_visit_usec(0),
-                       visits_after_fixed(0),
-                       visits_after_explored(0),
-                       first_explored_usec(0),
-                       first_explored_idx(0),
-                       num_explores(0),
-                       fixed_usec(0),
-                       fixed_idx(0),
-                       fixed_from_rset(false) {}
+  ProfilingNodeData(): node(-1) {
+    reset();
+  }
 
-  inline void explore() {
-    num_explores++;
+  inline void explore(VertexContext context = VertexContext()) {
     if (first_explored_usec == 0) {
+      num_explores++;
+      ctx_explored = context;
       timestamp now = clock_type::now();
       first_explored_usec = (now - profiling_start).count();
       first_explored_idx = explored_nodes++;
     }
   }
 
-  inline void fix(bool fixed_from_rset_ = false) {
+  inline void fix(VertexContext context = VertexContext()) {
     if (fixed) return;
     timestamp now = clock_type::now();
     fixed = true;
     fixed_usec = (now - profiling_start).count();
     fixed_idx = fixed_nodes++;
-    fixed_from_rset =  fixed_from_rset_;
+    ctx_fixed = context;
   }
 
   inline void visit() {
@@ -223,6 +225,27 @@ struct ProfilingNodeData {
       visits_after_fixed++;
       last_visit_usec = (now - profiling_start).count();
     }
+  }
+
+  void reset(bool reset_dist = true) {
+    pred = 0;
+    if (reset_dist) dist = DIST_INF;
+    fixed = false;
+    min_in_weight = DIST_INF;
+    min_out_weight = DIST_INF;
+    num_visits = 0;
+    first_visit_usec = 0;
+    first_visit_idx = 0;
+    last_visit_usec = 0;
+    visits_after_fixed = 0;
+    visits_after_explored = 0;
+    first_explored_usec = 0;
+    first_explored_idx = 0;
+    num_explores = 0;
+    fixed_usec = 0;
+    fixed_idx = 0;
+    ctx_explored = VertexContext();
+    ctx_fixed = VertexContext();
   }
 };
 
@@ -444,8 +467,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::Timer timer;
   timer.start();
 
-  //using WL = galois::MinHeap<T>;
-  using WL = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
+  using WL = galois::MinHeap<T>;
 
   graph.getData(source).dist = 0;
 
@@ -453,9 +475,7 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   explored_nodes = 0;
   fixed_nodes = 0;
 
-
-  GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
-  WL wl(gc);
+  WL wl;
 
   pushWrap(wl, source, 0);
 
@@ -633,10 +653,15 @@ void calc_graph_predecessors(typename GType::Graph& graph, R& edgeRange) {
   detail::EdgeDist<GType, typename GType::Graph::edge_data_type> edgeDist;
   // Fill the pred array
   for (auto vertex : graph) {
+    auto& v_data = graph.getData(vertex);
     for (auto edge : edgeRange(vertex)) {
+      auto edge_dist = edgeDist(graph, edge);
       auto& k_data = graph.getData(graph.getEdgeDst(edge));
       k_data.pred++;
-      k_data.min_in_weight = std::min(k_data.min_in_weight, edgeDist(graph, edge));
+      k_data.min_in_weight = std::min(k_data.min_in_weight, edge_dist);
+      if (v_data.min_out_weight > edge_dist) {
+        v_data.min_out_weight = edge_dist;
+      }
     }
   }
 }
@@ -705,9 +730,9 @@ void serSP1Algo(Graph& graph, const GNode& source,
             k_data.pred--;
             if (k_data.pred <= 0) {
               k_data.fix();
+
               r_set.push_back(k);
             }
-
             if (k_data.dist > z_data.dist + z_k_dist) {
               k_data.dist = z_data.dist + z_k_dist;
               if (!k_data.fixed) {
@@ -756,7 +781,6 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
   using Dist = typename Traits::Dist;
   // The set of nodes which have been fixed but not explored
-
   size_t nodes_fixed = 0;
 
   galois::gstl::Vector<GNodeData*> r_set;
@@ -791,7 +815,8 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
       heap.pop();
       min = item_data;
-      min->fix();
+      min->fix({VertexSource::HEAP, heap.size()});
+      min->explore({VertexSource::HEAP, heap.size()});
       r_set.push_back(min);
     }
 
@@ -804,7 +829,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
     while(r_set.size() > 0) {
       GNodeData* z = r_set.back();
       r_set.pop_back();
-      z->explore();
+      z->explore({VertexSource::R_SET, r_set.size()});
 
       // Get all the vertices that have edges from z
       for (auto e : edgeRange(z->node)) {
@@ -822,7 +847,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         }
 
         if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
-          k->fix(true);
+          k->fix({VertexSource::R_SET, r_set.size()});
           r_set.push_back(k);
         } else if (changed) {
           q_set.push_back({k, k->dist});
@@ -833,7 +858,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
-        min->fix();
+        min->fix({VertexSource::R_SET, r_set.size()});
         r_set.push_back(min);
       }
     }
@@ -1280,9 +1305,8 @@ template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
-void init_graph(Graph& graph, GNode& source, GNode& report) {
+void init_graph(Graph& graph, GNode& source, GNode& report, bool reset_dist = true) {
 
-  using SSSP = typename Traits::SSSP;
   std::cout << "Reading from file: " << filename << std::endl;
   galois::graphs::readGraph(graph, filename);
   std::cout << "Read " << graph.size() << " nodes, " << graph.sizeEdges()
@@ -1319,10 +1343,9 @@ void init_graph(Graph& graph, GNode& source, GNode& report) {
   }
 
   galois::do_all(galois::iterate(graph),
-                 [&graph](GNode n) {
+                 [&](GNode n) {
                    auto& data = graph.getData(n);
-                   data.dist = SSSP::DIST_INFINITY;
-                   data.min_in_weight = SSSP::DIST_INFINITY;
+                   data.reset(reset_dist);
                    data.node = n;
                  });
 
@@ -1390,7 +1413,7 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
   profile.open(prof_filename);
   profile << "node_idx;pred;dist;fixed;min_in_weight;num_visits;first_visit_usec;first_visit_idx";
   profile << "last_visit_usec;visits_after_fixed;visits_after_explored;first_explored_usec;first_explored_idx;";
-  profile << "num_explores;fixed_usec;fixed_idx;" << std::endl;
+  profile << "num_explores;fixed_usec;fixed_idx;fixed_source;fixed_source_size;explored_source;explored_source_size;" << std::endl;
 
   for (auto& node : graph) {
     auto& d = graph.getData(node);
@@ -1400,7 +1423,8 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
     profile << d.last_visit_usec << ";" << d.visits_after_fixed << ";" << d.visits_after_explored << ";";
     profile << d.first_explored_usec << ";" << d.first_explored_idx << ";";
     profile << d.num_explores << ";" << d.fixed_usec << ";" << d.fixed_idx << ";";
-    profile << d.fixed_from_rset << ";" << std::endl;
+    profile << d.ctx_fixed.vertex_source << ";" << d.ctx_fixed.set_size << ";";
+    profile << d.ctx_explored.vertex_source << ";" << d.ctx_explored.set_size << std::endl;
   }
 
   profile.close();
@@ -1499,8 +1523,8 @@ int main(int argc, char** argv) {
     case dijkstraTile: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
 
+      init_graph<SerGType>(graph, source, report);
       Tmain.start();
       dijkstraAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
           graph, source,
@@ -1524,6 +1548,16 @@ int main(int argc, char** argv) {
       Tmain.stop();
 
       verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+
+      init_graph<SerGType>(graph, source, report);
+      Tmain.start();
+      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+          graph, source,
+          SerGType::Traits::ReqPushWrap(),
+          SerGType::Traits::OutEdgeRangeFn{graph});
+      Tmain.stop();
+
+      verify_and_report<SerGType>(graph, source, report, std::string(ALGO_NAMES[algo]) + "_baseline");
       break;
     }
     case topo: {
@@ -1582,6 +1616,16 @@ int main(int argc, char** argv) {
           edgeRange);
       Tmain.stop();
       verify_and_report<GType>(graph, source, report, ALGO_NAMES[algo]);
+
+      init_graph<GType>(graph, source, report, false);
+      calc_graph_predecessors<GType>(graph, edgeRange);
+      Tmain.start();
+      serSP2Algo<GType, GType::Traits::UpdateRequest>(
+          graph, source,
+          GType::Traits::ReqPushWrap(),
+          edgeRange);
+      Tmain.stop();
+      verify_and_report<GType>(graph, source, report, std::string(ALGO_NAMES[algo]) + "_baseline");
       break;
     }
     case parSP1: {
