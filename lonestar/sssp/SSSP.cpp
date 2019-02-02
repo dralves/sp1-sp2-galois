@@ -85,12 +85,13 @@ enum Algo {
   serSP2,
   parSP1,
   parSP2V,
-  parSP2E
+  parSP2E,
+  APSPserSP2
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep", "deltaStepSP1", "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E"};
+                                  "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E","APSPserSP2"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -107,6 +108,7 @@ static cll::opt<Algo>
                      clEnumVal(parSP1, "parSP1"),
                      clEnumVal(parSP2V, "parSP2V"),
                      clEnumVal(parSP2E, "parSP2E"),
+                     clEnumVal(APSPserSP2, "APSPserSP2"),
                      clEnumValEnd),
          cll::init(deltaTile));
 
@@ -775,9 +777,9 @@ template <typename GType,
 void serSP2Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange) {
 
-  //using Heap = galois::MinHeap<T>;
+  using Heap = galois::MinHeap<T>;
 
-  using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
+  //using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
 
   using Dist = typename Traits::Dist;
   // The set of nodes which have been fixed but not explored
@@ -792,9 +794,10 @@ void serSP2Algo(Graph& graph, const GNode& source,
   explored_nodes = 0;
   fixed_nodes = 0;
 
-  GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
+  //GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
 
-  Heap heap(gc);
+  //Heap heap(gc);
+  Heap heap;
   pushWrap(heap, source, 0);
 
   GNodeData* min = nullptr;
@@ -1356,6 +1359,25 @@ void init_graph(Graph& graph, GNode& source, GNode& report, bool reset_dist = tr
   fixed_nodes = 0;
 }
 
+template <typename GType,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename Traits = typename GType::Traits>
+void init_graphAPSP(Graph& graph, GNode& source) {
+
+  using SSSP = typename Traits::SSSP;
+
+  galois::do_all(galois::iterate(graph),
+                 [&graph](GNode n) {
+                   auto& data = graph.getData(n);
+                   data.dist = SSSP::DIST_INFINITY;
+                   data.min_in_weight = SSSP::DIST_INFINITY;
+                   data.node = n;
+                 });
+
+  graph.getData(source).dist = 0;
+}
+
 struct MatchPathSeparator
 {
     bool operator()( char ch ) const
@@ -1677,6 +1699,55 @@ int main(int argc, char** argv) {
       Tmain.stop();
 
       verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      break;
+    }
+
+    case APSPserSP2: {
+      using GType = ParGType;
+      using Graph = GType::Graph;
+      using GNode = GType::GNode;
+      using Traits = GType::Traits;
+
+      Graph graph_ref;
+      GNode source, report;
+      galois::gstl::Vector<GNode> ctx2;
+
+      auto edgeRange = Traits::OutEdgeRangeFn{graph_ref};
+
+      galois::graphs::readGraph(graph_ref, filename);
+      init_graph<GType>(graph_ref, source, report);
+      size_t approxNodeData = graph_ref.size() * 64 * (graph_ref.size() + 1);
+
+      galois::preAlloc(numThreads + approxNodeData / galois::runtime::pagePoolSize());
+
+      std::vector<Graph> graph(graph_ref.size()+1);
+
+      for(GNode vertex : graph_ref){
+       galois::graphs::readGraph(graph[vertex], filename);
+       init_graphAPSP<GType>(graph[vertex], vertex);
+        calc_graph_predecessors<GType>(graph[vertex], edgeRange);
+        ctx2.push_back(vertex);
+      }
+
+      auto parallel_loop = [&](const GNode source, auto& ctx){
+
+       serSP2Algo<ParGType, ParGType::Traits::UpdateRequest>(graph[source], source, ParGType::Traits::ReqPushWrap(), edgeRange);
+
+      };
+
+      Tmain.start();
+      galois::for_each(galois::iterate(ctx2),
+                      parallel_loop,
+                       galois::wl<galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>>(),
+                       galois::no_conflicts(),
+                      galois::loopname("All Pairs Shortest Path"));
+
+      Tmain.stop();
+
+      for(GNode vertex : graph_ref){
+          verify_and_report<GType>(graph[vertex], vertex, report, ALGO_NAMES[algo]);
+        }
+
       break;
     }
     default:
