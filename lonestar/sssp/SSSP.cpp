@@ -70,6 +70,10 @@ static cll::opt<unsigned int>
     stepShift("delta",
               cll::desc("Shift value for the deltastep (default value 13)"),
               cll::init(13));
+static cll::opt<unsigned int>
+    APSP("APSP",
+              cll::desc("Run All Pairs Shortest Path version of the Algorithm if supported"),
+              cll::init(0));
 
 enum Algo {
   deltaTile = 0,
@@ -85,13 +89,12 @@ enum Algo {
   serSP2,
   parSP1,
   parSP2V,
-  parSP2E,
-  APSPserSP2
+  parSP2E
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep", "deltaStepSP1", "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E","APSPserSP2"};
+                                  "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -108,7 +111,6 @@ static cll::opt<Algo>
                      clEnumVal(parSP1, "parSP1"),
                      clEnumVal(parSP2V, "parSP2V"),
                      clEnumVal(parSP2E, "parSP2E"),
-                     clEnumVal(APSPserSP2, "APSPserSP2"),
                      clEnumValEnd),
          cll::init(deltaTile));
 
@@ -161,6 +163,16 @@ struct ParNodeData {
   inline void visit() {}
   inline void explore(VertexContext context = VertexContext()) {}
   inline void fix(VertexContext context = VertexContext()) {}
+};
+
+template<typename GraphTypes>
+struct APSPNodeData {
+  typename GraphTypes::APSPGraphType::GraphNode node;
+  std::vector<int> pred;
+  std::vector<uint32_t> dist;
+  std::vector<bool> fixed;
+  uint32_t min_in_weight;
+  uint32_t min_out_weight;
 };
 
 constexpr static const uint32_t DIST_INF = std::numeric_limits<uint32_t>::max() / 2 - 1;
@@ -270,6 +282,9 @@ struct ProfilingEdgeData {
 //   typedef ParNodeData<GraphTypes> ParNodeDataType;
 //   typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::ParNodeDataType, uint32_t>::
 //   with_no_lockable<true>::type ::with_numa_alloc<true>::type ParGraphType;
+//   typedef APSPNodeData<GraphTypes> APSPNodeDataType;
+//   typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::APSPNodeDataType, uint32_t>::
+//   with_no_lockable<true>::type ::with_numa_alloc<true>::type APSPGraphType;
 // };
 
 
@@ -281,6 +296,9 @@ struct GraphTypes {
   typedef ProfilingNodeData<GraphTypes> ParNodeDataType;
   typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::ParNodeDataType, ProfilingEdgeData, false, false, false, uint32_t>::
   with_no_lockable<true>::type ::with_numa_alloc<true>::type ParGraphType;
+  typedef APSPNodeData<GraphTypes> APSPNodeDataType;
+  typedef galois::graphs::LC_CSR_Graph<typename GraphTypes::APSPNodeDataType, ProfilingEdgeData, false, false, false, uint32_t>::
+  with_no_lockable<true>::type ::with_numa_alloc<true>::type APSPGraphType;
 };
 
 template<typename GType>
@@ -397,6 +415,55 @@ void deltaStepAlgo(Graph& graph,
     //! [report self-defined stats]
     galois::runtime::reportStat_Single("SSSP", "WLEmptyWork",
                                        WLEmptyWork.reduce());
+  }
+}
+template <typename GType,
+          typename T,
+          typename P,
+          typename R,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename Traits = typename GType::Traits>
+void serDeltaAlgoAPSP(Graph& graph, const GNode& source,
+                  const P& pushWrap, const R& edgeRange, uint32_t index) {
+
+  using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
+
+  SerialBucketWL<T, UpdateRequestIndexer> wl(UpdateRequestIndexer{stepShift});
+  graph.getData(source).dist.at(index) = 0;
+
+  pushWrap(wl, source, 0);
+
+  while (!wl.empty()) {
+
+    auto& curr = wl.minBucket();
+
+    while (!curr.empty()) {
+      auto item = curr.front();
+      curr.pop_front();
+
+      if (graph.getData(item.src).dist.at(index) < item.dist) {
+       continue;
+      }
+
+      for (auto e : edgeRange(item)) {
+        GNode dst   = graph.getEdgeDst(e);
+        auto& ddata = graph.getData(dst);
+
+        const auto newDist = item.dist + graph.getEdgeData(e).dist;
+
+        if (newDist < ddata.dist.at(index)) {
+          ddata.dist.at(index) = newDist;
+          pushWrap(wl, dst, newDist);
+        }
+      }
+    }
+
+    wl.goToNextBucket();
+  }
+
+  if (!wl.allEmpty()) {
+    std::abort();
   }
 }
 
@@ -525,6 +592,48 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Heap pushes", heap_pushes);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
   galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
+}
+
+template <typename GType,
+          typename T,
+          typename P,
+          typename R,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename GNodeData = typename GType::Graph::node_data_type,
+          typename Traits = typename GType::Traits>
+void dijkstraAlgoAPSP(Graph& graph, const GNode& source, const P& pushWrap,
+                  const R& edgeRange, uint32_t index) {
+
+  using WL = galois::MinHeap<T>;
+  graph.getData(source).dist.at(index) = 0;
+
+  WL wl;
+  pushWrap(wl, source, 0);
+
+  while (!wl.empty()) {
+
+    T item = wl.top();
+    wl.pop();
+
+    auto& item_data = graph.getData(item.src);
+    if (item_data.dist.at(index) < item.dist) {
+      continue;
+    }
+
+    for (auto e : edgeRange(item)) {
+
+      GNode dst   = graph.getEdgeDst(e);
+      auto& ddata = graph.getData(dst);
+
+      const auto newDist = item.dist + graph.getEdgeData(e).dist;
+
+      if (newDist < ddata.dist.at(index)) {
+        ddata.dist.at(index) = newDist;
+        pushWrap(wl, dst, newDist);
+      }
+    }
+  }
 }
 
 
@@ -668,6 +777,97 @@ void calc_graph_predecessors(typename GType::Graph& graph, R& edgeRange) {
   }
 }
 
+template<typename GType, typename R>
+void calc_graph_predecessorsAPSP(typename GType::Graph& graph, R& edgeRange) {
+  detail::EdgeDist<GType, typename GType::Graph::edge_data_type> edgeDist;
+  // Fill the pred array
+  for (auto vertex : graph) {
+    auto& v_data = graph.getData(vertex);
+    for (auto edge : edgeRange(vertex)) {
+      auto edge_dist = edgeDist(graph, edge);
+      auto& k_data = graph.getData(graph.getEdgeDst(edge));
+      k_data.pred.at(0)++;
+      k_data.min_in_weight = std::min(k_data.min_in_weight, edge_dist);
+      if (v_data.min_out_weight > edge_dist) {
+        v_data.min_out_weight = edge_dist;
+      }
+    }
+  }
+  for (auto vertex : graph) {
+    auto& v_data = graph.getData(vertex);
+    for(auto index : graph) {
+      v_data.pred.at(index) = v_data.pred.at(0);
+    }
+  }
+}
+
+template <typename GType,
+          typename T,
+          typename P,
+          typename R,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename GNodeData = typename GType::Graph::node_data_type,
+          typename Traits = typename GType::Traits>
+void serSP1AlgoAPSP(Graph& graph, const GNode& source,
+                const P& pushWrap, const R& edgeRange, uint32_t index) {
+  using Heap = galois::MinHeap<T>;
+
+  Heap heap;
+  graph.getData(source).dist.at(index) = 0;
+  pushWrap(heap, source, 0);
+
+  galois::gstl::Vector<GNode> r_set;
+  galois::gstl::Vector<GNodeData*> q_set;
+
+  while (!heap.empty()) {
+    T j = heap.pop();
+
+    auto& j_data = graph.getData(j.src);
+
+    if (j_data.dist.at(index) < j.dist) {
+      continue;
+    }
+
+    if (!j_data.fixed.at(index)) {
+      j_data.fixed.at(index) = true;
+      GNode z = j.src;
+
+      while(true) {
+        auto& z_data = graph.getData(z);
+        for (auto e : edgeRange(z)) {
+          GNode k = graph.getEdgeDst(e);
+          auto& k_data = graph.getData(k);
+
+          if (!k_data.fixed.at(index)) {
+
+            auto z_k_dist = graph.getEdgeData(e).dist;
+            k_data.pred.at(index)--;
+
+            if (k_data.pred.at(index) <= 0) {
+              k_data.fixed.at(index) = true;
+              r_set.push_back(k);
+            }
+
+            if (k_data.dist.at(index) > z_data.dist.at(index) + z_k_dist) {
+              k_data.dist.at(index) = z_data.dist.at(index) + z_k_dist;
+
+              if (!k_data.fixed.at(index)) {
+                pushWrap(heap, k_data.node, k_data.dist.at(index));
+              }
+            }
+          }
+        }
+
+        if (r_set.empty()) break;
+        z = r_set.back();
+        r_set.pop_back();
+      }
+    }
+  }
+}
+
+
 template <typename GType,
           typename T,
           typename P,
@@ -765,6 +965,83 @@ void serSP1Algo(Graph& graph, const GNode& source,
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
   galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
 }
+
+template <typename GType,
+          typename T,
+          typename P,
+          typename R,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename GNodeData = typename GType::Graph::node_data_type,
+          typename Traits = typename GType::Traits>
+void serSP2AlgoAPSP(Graph& graph, const GNode& source,
+                const P& pushWrap, const R& edgeRange, uint32_t index) {
+
+  using Heap = galois::MinHeap<T>;
+  using Dist = typename Traits::Dist;
+
+  Heap heap;
+  graph.getData(source).dist.at(index) = 0;
+  pushWrap(heap, source, 0);
+  auto d = 0;
+
+  galois::gstl::Deque<GNode> r_set;
+  galois::gstl::Vector<GNodeData*> q_set;
+
+  while (!heap.empty()) {
+    T j = heap.pop();
+
+    auto& j_data = graph.getData(j.src);
+
+    if (j_data.dist.at(index) < j.dist) {
+      continue;
+    }
+
+    if (!j_data.fixed.at(index)) {
+      j_data.fixed.at(index) = true;
+      GNode z = j.src;
+      d = j_data.dist.at(index);
+
+      while(true) {
+        auto& z_data = graph.getData(z);
+        for (auto e : edgeRange(z)) {
+          GNode k = graph.getEdgeDst(e);
+          auto& k_data = graph.getData(k);
+          if (!k_data.fixed.at(index)) {
+
+            Dist z_k_dist = graph.getEdgeData(e).dist;
+	    k_data.pred.at(index)--;
+	    auto k_dist = z_data.dist.at(index) + z_k_dist;
+
+            if ((k_data.pred.at(index) <=0) || k_dist <= (d + k_data.min_in_weight)){
+                k_data.fixed.at(index) = true;
+                r_set.push_back(k);
+            }
+
+            if (k_data.dist.at(index) > z_data.dist.at(index) + z_k_dist){
+              k_data.dist.at(index) = z_data.dist.at(index) + z_k_dist;
+
+	      if (!k_data.fixed.at(index)) {
+		q_set.push_back(&k_data);
+              }
+	    }
+          }
+        }
+
+        if (r_set.empty()) break;
+        z = r_set.front();
+        r_set.pop_front();
+      }
+
+      for (auto& z : q_set) {
+        auto& z_data = *z;
+        pushWrap(heap, z_data.node, z_data.dist.at(index));
+      }
+      q_set.clear();
+    }
+  }
+}
+
 
 template <typename GType,
           typename T,
@@ -1363,19 +1640,70 @@ template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
-void init_graphAPSP(Graph& graph, GNode& source) {
+void init_graphAPSP(Graph& graph) {
 
   using SSSP = typename Traits::SSSP;
 
   galois::do_all(galois::iterate(graph),
                  [&graph](GNode n) {
                    auto& data = graph.getData(n);
-                   data.dist = SSSP::DIST_INFINITY;
                    data.min_in_weight = SSSP::DIST_INFINITY;
                    data.node = n;
+                   data.dist.resize(graph.size());
+                   data.pred.resize(graph.size());
+                   data.fixed.resize(graph.size());
+		   for(GNode index : graph){
+                     data.dist.at(index) = SSSP::DIST_INFINITY;
+		     data.pred.at(index) = 0;
+		     data.fixed.at(index) = false;
+		   }
                  });
+}
 
-  graph.getData(source).dist = 0;
+template <typename GType,
+	  typename T,
+	  typename P,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename Traits = typename GType::Traits>
+void all_pairs_shortest_path(Graph& graph_ref, uint32_t algo, std::string file, T& edgeRange, P& pushWrap) {
+
+  init_graphAPSP<GType>(graph_ref);
+  galois::gstl::Vector<GNode> ctx;
+  calc_graph_predecessorsAPSP<GType>(graph_ref, edgeRange);
+
+  for(GNode vertex : graph_ref){
+    ctx.push_back(vertex);
+  }
+
+  auto parallel_loop = [&](GNode source, auto& ctx){
+    switch(algo){
+      case dijkstra : {
+	  dijkstraAlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          break;
+        }
+      case serDelta : {
+          serDeltaAlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          break;
+        }
+      case serSP1 : {
+          serSP1AlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          break;
+        }
+      case serSP2 : {
+          serSP2AlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          break;
+        }
+      default : break;
+    }
+  };
+
+  galois::for_each(galois::iterate(ctx),
+                  parallel_loop,
+                  galois::wl<galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>>(),
+                  galois::no_conflicts(),
+                  galois::loopname("All Pairs Shortest Path"));
+
 }
 
 struct MatchPathSeparator
@@ -1455,6 +1783,7 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
 int main(int argc, char** argv) {
   using ParGType = GraphType<GraphTypes::ParGraphType>;
   using SerGType = GraphType<GraphTypes::SerGraphType>;
+  using APSPGType = GraphType<GraphTypes::APSPGraphType>;
 
   galois::SharedMemSys G;
   LonestarStart(argc, argv, name, desc, url);
@@ -1466,33 +1795,43 @@ int main(int argc, char** argv) {
     case deltaTile: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<ParGType>(graph, source, report);
 
-      Tmain.start();
-      deltaStepAlgo<ParGType, ParGType::Traits::SrcEdgeTile>(
-          graph, source,
-          ParGType::Traits::SrcEdgeTilePushWrap{graph},
-          ParGType::Traits::TileRangeFn());
-      Tmain.stop();
+        Tmain.start();
+        deltaStepAlgo<ParGType, ParGType::Traits::SrcEdgeTile>(
+            graph, source,
+            ParGType::Traits::SrcEdgeTilePushWrap{graph},
+            ParGType::Traits::TileRangeFn());
+        Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case deltaStep: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
-      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors<ParGType>(graph, edgeRange);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<ParGType>(graph, source, report);
+        auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+        calc_graph_predecessors<ParGType>(graph, edgeRange);
 
-      Tmain.start();
-      deltaStepAlgo<ParGType, ParGType::Traits::UpdateRequest>(
-          graph, source,
-          ParGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
+        Tmain.start();
+        deltaStepAlgo<ParGType, ParGType::Traits::UpdateRequest>(
+            graph, source,
+            ParGType::Traits::ReqPushWrap(),
+            edgeRange);
+        Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     // case deltaStepSP1: {
@@ -1515,239 +1854,261 @@ int main(int argc, char** argv) {
     case serDeltaTile: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<SerGType>(graph, source, report);
 
-      Tmain.start();
-      serDeltaAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
-          graph, source,
-          SerGType::Traits::SrcEdgeTilePushWrap{graph},
-          SerGType::Traits::TileRangeFn());
-      Tmain.stop();
+        Tmain.start();
+        serDeltaAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
+            graph, source,
+            SerGType::Traits::SrcEdgeTilePushWrap{graph},
+            SerGType::Traits::TileRangeFn());
+        Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case serDelta: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
+      if(APSP){
+        using GType = APSPGType;
+        using Graph = GType::Graph;
 
-      Tmain.start();
-      serDeltaAlgo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          SerGType::Traits::OutEdgeRangeFn{graph});
-      Tmain.stop();
+        Graph graph_ref;
 
-      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        galois::graphs::readGraph(graph_ref, filename);
+        auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
+        auto pushWrap = GType::Traits::ReqPushWrap();
+
+        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+      }
+      else{
+        init_graph<SerGType>(graph, source, report);
+
+        Tmain.start();
+        serDeltaAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+            graph, source,
+            SerGType::Traits::ReqPushWrap(),
+            SerGType::Traits::OutEdgeRangeFn{graph});
+        Tmain.stop();
+
+        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case dijkstraTile: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<SerGType>(graph, source, report);
 
-      init_graph<SerGType>(graph, source, report);
-      Tmain.start();
-      dijkstraAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
-          graph, source,
-          SerGType::Traits::SrcEdgeTilePushWrap{graph},
-          SerGType::Traits::TileRangeFn());
-      Tmain.stop();
+        Tmain.start();
+        dijkstraAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
+            graph, source,
+            SerGType::Traits::SrcEdgeTilePushWrap{graph},
+            SerGType::Traits::TileRangeFn());
+        Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case dijkstra: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
+      if(APSP){
+        using GType = APSPGType;
+        using Graph = GType::Graph;
 
-      Tmain.start();
-      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          SerGType::Traits::OutEdgeRangeFn{graph});
-      Tmain.stop();
+        Graph graph_ref;
 
-      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        galois::graphs::readGraph(graph_ref, filename);
+	auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
+        auto pushWrap = GType::Traits::ReqPushWrap();
 
-      init_graph<SerGType>(graph, source, report);
-      Tmain.start();
-      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          SerGType::Traits::OutEdgeRangeFn{graph});
-      Tmain.stop();
+        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+      }
+      else{
+        init_graph<SerGType>(graph, source, report);
 
-      verify_and_report<SerGType>(graph, source, report, std::string(ALGO_NAMES[algo]) + "_baseline");
+        Tmain.start();
+        dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+            graph, source,
+            SerGType::Traits::ReqPushWrap(),
+            SerGType::Traits::OutEdgeRangeFn{graph});
+        Tmain.stop();
+
+        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case topo: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<ParGType>(graph, source, report);
 
-      Tmain.start();
-      topoAlgo<ParGType>(graph, source);
-      Tmain.stop();
+        Tmain.start();
+        topoAlgo<ParGType>(graph, source);
+        Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case topoTile: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<ParGType>(graph, source, report);
 
-      Tmain.start();
-      topoTileAlgo<ParGType>(graph, source);
-      Tmain.stop();
+        Tmain.start();
+        topoTileAlgo<ParGType>(graph, source);
+        Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case serSP1: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
-      auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors<SerGType>(graph, edgeRange);
+      if(APSP){
+        using GType = APSPGType;
+        using Graph = GType::Graph;
 
-      Tmain.start();
-      serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
+        Graph graph_ref;
 
-      verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        galois::graphs::readGraph(graph_ref, filename);
+	auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
+        auto pushWrap = GType::Traits::ReqPushWrap();
+
+        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+      }
+      else{
+        init_graph<SerGType>(graph, source, report);
+        auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
+        calc_graph_predecessors<SerGType>(graph, edgeRange);
+
+        Tmain.start();
+        serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
+            graph, source,
+            SerGType::Traits::ReqPushWrap(),
+            edgeRange);
+        Tmain.stop();
+
+        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case serSP2: {
       using GType = SerGType;
       GType::Graph graph;
       GType::GNode source, report;
-      init_graph<GType>(graph, source, report);
-      auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors<GType>(graph, edgeRange);
+      if(APSP){
+        using GType = APSPGType;
+        using Graph = GType::Graph;
 
-      Tmain.start();
-      serSP2Algo<GType, GType::Traits::UpdateRequest>(
-          graph, source,
-          GType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
-      verify_and_report<GType>(graph, source, report, ALGO_NAMES[algo]);
+        Graph graph_ref;
 
-      init_graph<GType>(graph, source, report, false);
-      calc_graph_predecessors<GType>(graph, edgeRange);
-      Tmain.start();
-      serSP2Algo<GType, GType::Traits::UpdateRequest>(
-          graph, source,
-          GType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
-      verify_and_report<GType>(graph, source, report, std::string(ALGO_NAMES[algo]) + "_baseline");
+        galois::graphs::readGraph(graph_ref, filename);
+	auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
+        auto pushWrap = GType::Traits::ReqPushWrap();
+
+        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+      }
+      else{
+        init_graph<GType>(graph, source, report);
+        auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+        calc_graph_predecessors<GType>(graph, edgeRange);
+
+        Tmain.start();
+        serSP2Algo<GType, GType::Traits::UpdateRequest>(
+            graph, source,
+            GType::Traits::ReqPushWrap(),
+            edgeRange);
+        Tmain.stop();
+        verify_and_report<GType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case parSP1: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
-      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors<ParGType>(graph, edgeRange);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<ParGType>(graph, source, report);
+        auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+        calc_graph_predecessors<ParGType>(graph, edgeRange);
 
-      Tmain.start();
-      parSP1Algo<ParGType, ParGType::Traits::UpdateRequest>(
-          graph, source,
-          ParGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
+        Tmain.start();
+        parSP1Algo<ParGType, ParGType::Traits::UpdateRequest>(
+            graph, source,
+            ParGType::Traits::ReqPushWrap(),
+            edgeRange);
+        Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case parSP2V: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
-      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors<ParGType>(graph, edgeRange);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+      }
+      else{
+        init_graph<ParGType>(graph, source, report);
+        auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+        calc_graph_predecessors<ParGType>(graph, edgeRange);
 
-      Tmain.start();
-      parSP2VerticesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
-          graph, source,
-          ParGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
+        Tmain.start();
+        parSP2VerticesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
+            graph, source,
+            ParGType::Traits::ReqPushWrap(),
+            edgeRange);
+        Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     case parSP2E: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
-      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors<ParGType>(graph, edgeRange);
-
-      Tmain.start();
-      parSP2EdgesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
-          graph, source,
-          ParGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
-
-      verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
-      break;
-    }
-
-    case APSPserSP2: {
-      using GType = ParGType;
-      using Graph = GType::Graph;
-      using GNode = GType::GNode;
-      using Traits = GType::Traits;
-
-      Graph graph_ref;
-      GNode source, report;
-      galois::gstl::Vector<GNode> ctx2;
-
-      auto edgeRange = Traits::OutEdgeRangeFn{graph_ref};
-
-      galois::graphs::readGraph(graph_ref, filename);
-      init_graph<GType>(graph_ref, source, report);
-      size_t approxNodeData = graph_ref.size() * 64 * (graph_ref.size() + 1);
-
-      galois::preAlloc(numThreads + approxNodeData / galois::runtime::pagePoolSize());
-
-      std::vector<Graph> graph(graph_ref.size()+1);
-
-      for(GNode vertex : graph_ref){
-       galois::graphs::readGraph(graph[vertex], filename);
-       init_graphAPSP<GType>(graph[vertex], vertex);
-        calc_graph_predecessors<GType>(graph[vertex], edgeRange);
-        ctx2.push_back(vertex);
+      if(APSP){
+        std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
       }
+      else{
+        init_graph<ParGType>(graph, source, report);
+        auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+        calc_graph_predecessors<ParGType>(graph, edgeRange);
 
-      auto parallel_loop = [&](const GNode source, auto& ctx){
+        Tmain.start();
+        parSP2EdgesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
+            graph, source,
+            ParGType::Traits::ReqPushWrap(),
+            edgeRange);
+        Tmain.stop();
 
-       serSP2Algo<ParGType, ParGType::Traits::UpdateRequest>(graph[source], source, ParGType::Traits::ReqPushWrap(), edgeRange);
-
-      };
-
-      Tmain.start();
-      galois::for_each(galois::iterate(ctx2),
-                      parallel_loop,
-                       galois::wl<galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>>(),
-                       galois::no_conflicts(),
-                      galois::loopname("All Pairs Shortest Path"));
-
-      Tmain.stop();
-
-      for(GNode vertex : graph_ref){
-          verify_and_report<GType>(graph[vertex], vertex, report, ALGO_NAMES[algo]);
-        }
-
+        verify_and_report<ParGType>(graph, source, report, ALGO_NAMES[algo]);
+      }
       break;
     }
     default:
