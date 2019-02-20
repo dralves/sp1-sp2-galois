@@ -424,8 +424,8 @@ template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
-void serDeltaAlgoAPSP(Graph& graph, const GNode& source,
-                  const P& pushWrap, const R& edgeRange, uint32_t index) {
+void serDeltaAlgo(Graph& graph, const GNode& source,
+                  const P& pushWrap, const R& edgeRange, uint32_t index = 0) {
 
   using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
 
@@ -474,136 +474,10 @@ template <typename GType,
           typename R,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
-          typename Traits = typename GType::Traits>
-void serDeltaAlgo(Graph& graph, const GNode& source,
-                  const P& pushWrap, const R& edgeRange) {
-
-  using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
-
-  SerialBucketWL<T, UpdateRequestIndexer> wl(UpdateRequestIndexer{stepShift});
-  graph.getData(source).dist = 0;
-
-  pushWrap(wl, source, 0);
-
-  size_t iter = 0ul;
-  while (!wl.empty()) {
-
-    auto& curr = wl.minBucket();
-
-    while (!curr.empty()) {
-      ++iter;
-      auto item = curr.front();
-      curr.pop_front();
-
-      if (graph.getData(item.src).dist < item.dist) {
-        // empty work
-       continue;
-      }
-
-      for (auto e : edgeRange(item)) {
-        GNode dst   = graph.getEdgeDst(e);
-        auto& ddata = graph.getData(dst);
-
-        const auto newDist = item.dist + graph.getEdgeData(e).dist;
-
-        if (newDist < ddata.dist) {
-          ddata.dist = newDist;
-          pushWrap(wl, dst, newDist);
-        }
-      }
-    }
-
-    wl.goToNextBucket();
-  }
-
-  if (!wl.allEmpty()) {
-    std::abort();
-  }
-  galois::runtime::reportStat_Single("SSSP-Serial-Delta", "Iterations", iter);
-}
-
-template <typename GType,
-          typename T,
-          typename P,
-          typename R,
-          typename Graph = typename GType::Graph,
-          typename GNode = typename GType::GNode,
           typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
 void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
-                  const R& edgeRange) {
-
-  galois::Timer timer;
-  timer.start();
-
-  using WL = galois::MinHeap<T>;
-
-  graph.getData(source).dist = 0;
-
-  profiling_start = clock_type::now();
-  explored_nodes = 0;
-  fixed_nodes = 0;
-
-  WL wl;
-
-  pushWrap(wl, source, 0);
-
-  size_t iter = 0;
-  size_t inner_iter = 0;
-  size_t heap_pushes =0;
-  double average_heap_size = 0;
-  size_t duplicated_items = 0;
-
-  while (!wl.empty()) {
-    ++iter;
-    average_heap_size += wl.size();
-
-    T item = wl.top();
-    wl.pop();
-
-    auto& item_data = graph.getData(item.src);
-    if (item_data.dist < item.dist) {
-      duplicated_items++;
-      continue;
-    }
-
-    item_data.fix();
-    item_data.explore();
-
-    for (auto e : edgeRange(item)) {
-
-      inner_iter++;
-      GNode dst   = graph.getEdgeDst(e);
-      auto& ddata = graph.getData(dst);
-      ddata.visit();
-
-      const auto newDist = item.dist + graph.getEdgeData(e).dist;
-
-      if (newDist < ddata.dist) {
-        ddata.dist = newDist;
-        pushWrap(wl, dst, newDist);
-        heap_pushes++;
-      }
-    }
-  }
-
-  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Iterations", iter);
-  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Inner iteration", inner_iter);
-  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
-  galois::runtime::reportStat_Single("SSSP-Dijkstra", "Average heap size", average_heap_size / iter);
-}
-
-template <typename GType,
-          typename T,
-          typename P,
-          typename R,
-          typename Graph = typename GType::Graph,
-          typename GNode = typename GType::GNode,
-          typename GNodeData = typename GType::Graph::node_data_type,
-          typename Traits = typename GType::Traits>
-void dijkstraAlgoAPSP(Graph& graph, const GNode& source, const P& pushWrap,
-                  const R& edgeRange, uint32_t index) {
+                  const R& edgeRange, uint32_t index = 0) {
 
   using WL = galois::MinHeap<T>;
   graph.getData(source).dist.at(index) = 0;
@@ -636,110 +510,6 @@ void dijkstraAlgoAPSP(Graph& graph, const GNode& source, const P& pushWrap,
   }
 }
 
-
-// template <typename GType,
-//           typename T,
-//           typename P,
-//           typename R,
-//           typename Graph = typename GType::Graph,
-//           typename GNode = typename GType::GNode,
-//           typename GNodeData = typename GType::Graph::node_data_type,
-//           typename Traits = typename GType::Traits>
-// void deltaStepAlgoSP1(Graph& graph,
-//                       GNode source,
-//                       const P& pushWrap,
-//                       const R& edgeRange) {
-
-//   using Dist                 = typename Traits::Dist;
-//   using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
-
-//   //! [reducible for self-defined stats]
-//   galois::GAccumulator<size_t> BadWork;
-//   //! [reducible for self-defined stats]
-//   galois::GAccumulator<size_t> WLEmptyWork;
-
-//   namespace gwl = galois::worklists;
-
-//   using PSchunk = gwl::PerSocketChunkFIFO<CHUNK_SIZE>;
-//   using OBIM = galois::worklists::OrderedByIntegerMetric<UpdateRequestIndexer, PSchunk>;
-
-//   auto& sdata = graph.getData(source);
-//   sdata.dist = 0;
-//   sdata.fixed = true;
-
-//   std::atomic<Dist> min(0);
-
-//   galois::InsertBag<T> initBag;
-//   pushWrap(initBag, source, 0, "parallel");
-
-//   galois::for_each(galois::iterate(initBag),
-//                    [&](const T& item, auto& ctx) {
-//                      constexpr galois::MethodFlag flag =
-//                          galois::MethodFlag::UNPROTECTED;
-//                      auto& sdata = graph.getData(item.src, flag);
-
-//                      if (sdata.dist < item.dist || (sdata.fixed && sdata.explored)) {
-//                        if (TRACK_WORK) WLEmptyWork += 1;
-//                        return;
-//                      }
-
-//                      thread_local std::vector<GNodeData*> r_set(100);
-//                      r_set.push_back(&sdata);
-
-//                      while (!r_set.empty()) {
-//                        auto elem = r_set.back();
-//                        r_set.pop_back();
-
-//                        for (auto ii : edgeRange(elem)) {
-
-//                          GNode dst = graph.getEdgeDst(ii);
-//                          auto& ddist = graph.getData(dst, flag);
-//                          Dist ew = graph.getEdgeData(ii, flag);
-//                          const Dist newDist = elem.dist + ew;
-
-//                          if (ddist.fixed) continue;
-
-//                          bool changed = false;
-//                          while (true) {
-//                            Dist oldDist = ddist.dist;
-
-//                            if (oldDist <= newDist) break;
-
-//                            if (ddist.dist.compare_exchange_weak(
-//                                    oldDist, newDist, std::memory_order_relaxed)) {
-//                              changed = true;
-//                              break;
-//                            }
-//                          }
-
-//                          if (elem.fixed && --ddist.pred <= 0) {
-//                            ddist.fixed = true;
-//                            if (changed) {
-//                              r_set.push_back(ddist);
-//                              continue;
-//                            }
-//                          }
-
-//                          if (changed) {
-//                            pushWrap(ctx, dst, newDist);
-//                          }
-//                        }
-
-//                        if (sdata.fixed) sdata.explored = true;
-//                      }
-
-//                    },
-//                    galois::wl<OBIM>(UpdateRequestIndexer{stepShift}),
-//                    galois::no_conflicts(), galois::loopname("SSSP"));
-
-//   if (TRACK_WORK) {
-//     //! [report self-defined stats]
-//     galois::runtime::reportStat_Single("SSSP", "BadWork", BadWork.reduce());
-//     //! [report self-defined stats]
-//     galois::runtime::reportStat_Single("SSSP", "WLEmptyWork",
-//                                        WLEmptyWork.reduce());
-//   }
-// }
 
 namespace detail{
 template<typename GType, typename Edge>
@@ -793,13 +563,16 @@ void calc_graph_predecessorsAPSP(typename GType::Graph& graph, R& edgeRange) {
       }
     }
   }
-  for (auto vertex : graph) {
-    auto& v_data = graph.getData(vertex);
-    for(auto index : graph) {
-      v_data.pred.at(index) = v_data.pred.at(0);
+  if(APSP){
+    for (auto vertex : graph) {
+      auto& v_data = graph.getData(vertex);
+      for(auto index : graph) {
+        v_data.pred.at(index) = v_data.pred.at(0);
+      }
     }
   }
 }
+
 
 template <typename GType,
           typename T,
@@ -809,18 +582,20 @@ template <typename GType,
           typename GNode = typename GType::GNode,
           typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
-void serSP1AlgoAPSP(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange, uint32_t index) {
+void serSP1Algo(Graph& graph, const GNode& source,
+                const P& pushWrap, const R& edgeRange, uint32_t index = 0) {
   using Heap = galois::MinHeap<T>;
 
   Heap heap;
   graph.getData(source).dist.at(index) = 0;
   pushWrap(heap, source, 0);
 
+  // The set of nodes which have been fixed but not explored
   galois::gstl::Vector<GNode> r_set;
-  galois::gstl::Vector<GNodeData*> q_set;
 
+  // While the heap is not empty
   while (!heap.empty()) {
+    // Get the min element from the heap.
     T j = heap.pop();
 
     auto& j_data = graph.getData(j.src);
@@ -829,29 +604,29 @@ void serSP1AlgoAPSP(Graph& graph, const GNode& source,
       continue;
     }
 
+    // If the min element is not fixed
     if (!j_data.fixed.at(index)) {
+      // Set the element to fixed
       j_data.fixed.at(index) = true;
       GNode z = j.src;
 
+      // Inner loop, go through the all the elements in R
       while(true) {
         auto& z_data = graph.getData(z);
+        // Get all the vertices that have edges from z
         for (auto e : edgeRange(z)) {
           GNode k = graph.getEdgeDst(e);
           auto& k_data = graph.getData(k);
-
-          if (!k_data.fixed.at(index)) {
-
+          // If k vertex is not fixed, process the edge between z and k.
+          if (!k_data.fixed.at(index)){
             auto z_k_dist = graph.getEdgeData(e).dist;
             k_data.pred.at(index)--;
-
             if (k_data.pred.at(index) <= 0) {
-              k_data.fixed.at(index) = true;
+	      k_data.fixed.at(index) = true;
               r_set.push_back(k);
             }
-
             if (k_data.dist.at(index) > z_data.dist.at(index) + z_k_dist) {
               k_data.dist.at(index) = z_data.dist.at(index) + z_k_dist;
-
               if (!k_data.fixed.at(index)) {
                 pushWrap(heap, k_data.node, k_data.dist.at(index));
               }
@@ -874,192 +649,15 @@ template <typename GType,
           typename R,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
-          typename Traits = typename GType::Traits>
-void serSP1Algo(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange) {
-
-  using Heap = galois::MinHeap<T>;
-
-  Heap heap;
-  pushWrap(heap, source, 0);
-
-  // The set of nodes which have been fixed but not explored
-  galois::gstl::Vector<GNode> r_set;
-
-  size_t outer_iter = 0;
-  size_t middle_iter = 0;
-  size_t additional_nodes_explored = 0;
-  size_t inner_iter = 0;
-  size_t heap_pushes = 0;
-  size_t average_heap_size = 0;
-  size_t average_rset_size = 0;
-  size_t duplicated_items = 0;
-  size_t duplicates_avoided = 0;
-
-  // While the heap is not empty
-  while (!heap.empty()) {
-    average_heap_size += heap.size();
-    // Get the min element from the heap.
-    T j = heap.pop();
-    outer_iter++;
-
-    auto& j_data = graph.getData(j.src);
-
-    if (j_data.dist < j.dist) {
-      duplicated_items++;
-      continue;
-    }
-
-    // If the min element is not fixed
-    if (!j_data.fixed) {
-      // Set the element to fixed
-      j_data.fix();
-      j_data.explore();
-      GNode z = j.src;
-
-      // Inner loop, go through the all the elements in R
-      while(true) {
-        auto& z_data = graph.getData(z);
-        // Get all the vertices that have edges from z
-        for (auto e : edgeRange(z)) {
-          inner_iter++;
-          GNode k = graph.getEdgeDst(e);
-          auto& k_data = graph.getData(k);
-          k_data.visit();
-          // If k vertex is not fixed, process the edge between z and k.
-          if (!k_data.fixed) {
-            auto z_k_dist = graph.getEdgeData(e).dist;
-            k_data.pred--;
-            if (k_data.pred <= 0) {
-              k_data.fix();
-
-              r_set.push_back(k);
-            }
-            if (k_data.dist > z_data.dist + z_k_dist) {
-              k_data.dist = z_data.dist + z_k_dist;
-              if (!k_data.fixed) {
-                heap_pushes++;
-                pushWrap(heap, k_data.node, k_data.dist);
-              }
-            }
-          }
-        }
-
-        average_rset_size += r_set.size();
-        middle_iter++;
-
-        if (r_set.empty()) break;
-        z = r_set.back();
-        r_set.pop_back();
-        additional_nodes_explored++;
-      }
-    }
-  }
-
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Outer loop iterations", outer_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Inner loop iterations", inner_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes", duplicated_items);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Duplicated heap pushes avoided", duplicates_avoided);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Additional nodes explored", additional_nodes_explored);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
-  galois::runtime::reportStat_Single("SSSP-serSP1", "Average rset size", (average_rset_size + 1.0) / middle_iter);
-}
-
-template <typename GType,
-          typename T,
-          typename P,
-          typename R,
-          typename Graph = typename GType::Graph,
-          typename GNode = typename GType::GNode,
-          typename GNodeData = typename GType::Graph::node_data_type,
-          typename Traits = typename GType::Traits>
-void serSP2AlgoAPSP(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange, uint32_t index) {
-
-  using Heap = galois::MinHeap<T>;
-  using Dist = typename Traits::Dist;
-
-  Heap heap;
-  graph.getData(source).dist.at(index) = 0;
-  pushWrap(heap, source, 0);
-  auto d = 0;
-
-  galois::gstl::Deque<GNode> r_set;
-  galois::gstl::Vector<GNodeData*> q_set;
-
-  while (!heap.empty()) {
-    T j = heap.pop();
-
-    auto& j_data = graph.getData(j.src);
-
-    if (j_data.dist.at(index) < j.dist) {
-      continue;
-    }
-
-    if (!j_data.fixed.at(index)) {
-      j_data.fixed.at(index) = true;
-      GNode z = j.src;
-      d = j_data.dist.at(index);
-
-      while(true) {
-        auto& z_data = graph.getData(z);
-        for (auto e : edgeRange(z)) {
-          GNode k = graph.getEdgeDst(e);
-          auto& k_data = graph.getData(k);
-          if (!k_data.fixed.at(index)) {
-
-            Dist z_k_dist = graph.getEdgeData(e).dist;
-	    k_data.pred.at(index)--;
-	    auto k_dist = z_data.dist.at(index) + z_k_dist;
-
-            if ((k_data.pred.at(index) <=0) || k_dist <= (d + k_data.min_in_weight)){
-                k_data.fixed.at(index) = true;
-                r_set.push_back(k);
-            }
-
-            if (k_data.dist.at(index) > z_data.dist.at(index) + z_k_dist){
-              k_data.dist.at(index) = z_data.dist.at(index) + z_k_dist;
-
-	      if (!k_data.fixed.at(index)) {
-		q_set.push_back(&k_data);
-              }
-	    }
-          }
-        }
-
-        if (r_set.empty()) break;
-        z = r_set.front();
-        r_set.pop_front();
-      }
-
-      for (auto& z : q_set) {
-        auto& z_data = *z;
-        pushWrap(heap, z_data.node, z_data.dist.at(index));
-      }
-      q_set.clear();
-    }
-  }
-}
-
-
-template <typename GType,
-          typename T,
-          typename P,
-          typename R,
-          typename Graph = typename GType::Graph,
-          typename GNode = typename GType::GNode,
           typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
 void serSP2Algo(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange) {
+                const P& pushWrap, const R& edgeRange, uint32_t index=0) {
 
   using Heap = galois::MinHeap<T>;
-
-  //using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
-
   using Dist = typename Traits::Dist;
   // The set of nodes which have been fixed but not explored
+
   size_t nodes_fixed = 0;
 
   galois::gstl::Vector<GNodeData*> r_set;
@@ -1067,14 +665,8 @@ void serSP2Algo(Graph& graph, const GNode& source,
   std::vector<std::pair<GNodeData*, Dist>> q_set;
   q_set.reserve(100);
 
-  profiling_start = clock_type::now();
-  explored_nodes = 0;
-  fixed_nodes = 0;
-
-  //GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
-
-  //Heap heap(gc);
   Heap heap;
+  graph.getData(source).dist.at(index) = 0;
   pushWrap(heap, source, 0);
 
   GNodeData* min = nullptr;
@@ -1086,7 +678,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
       T item = heap.top();
       GNodeData* item_data = &graph.getData(item.src);
 
-      if (item_data->fixed || item_data->dist < item.dist) {
+      if (item_data->fixed.at(index) || item_data->dist.at(index) < item.dist) {
         heap.pop();
         // If we got a min, go do some work.
         if (!r_set.empty()) goto mainloop;
@@ -1095,12 +687,11 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
       heap.pop();
       min = item_data;
-      min->fix({VertexSource::HEAP, heap.size()});
-      min->explore({VertexSource::HEAP, heap.size()});
+      min->fixed.at(index) = true;
       r_set.push_back(min);
     }
 
-    if (LIKELY(!heap.empty()) && heap.top().dist == min->dist) {
+    if (LIKELY(!heap.empty()) && heap.top().dist == min->dist.at(index)) {
       continue;
     }
 
@@ -1109,48 +700,47 @@ void serSP2Algo(Graph& graph, const GNode& source,
     while(r_set.size() > 0) {
       GNodeData* z = r_set.back();
       r_set.pop_back();
-      z->explore({VertexSource::R_SET, r_set.size()});
 
       // Get all the vertices that have edges from z
       for (auto e : edgeRange(z->node)) {
         auto k = &graph.getData(graph.getEdgeDst(e));
-        k->visit();
         // If k vertex is not fixed, process the edge between z and k.
-        if (k->fixed) continue;
+        if (k->fixed.at(index)) continue;
         auto z_k_dist = graph.getEdgeData(e).dist;
 
         bool changed = false;
-        if (k->dist > z->dist + z_k_dist) {
-          k->dist = z->dist + z_k_dist;
+        if (k->dist.at(index) > z->dist.at(index) + z_k_dist) {
+          k->dist.at(index) = z->dist.at(index) + z_k_dist;
           changed = true;
-          if (k->dist < min->dist) min = k;
+          if (k->dist.at(index) < min->dist.at(index)) min = k;
         }
 
-        if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
-          k->fix({VertexSource::R_SET, r_set.size()});
+        if (--k->pred.at(index) <= 0 || k->dist.at(index) <= (min->dist.at(index) + k->min_in_weight)) {
+	  k->fixed.at(index) = true;
           r_set.push_back(k);
         } else if (changed) {
-          q_set.push_back({k, k->dist});
+          q_set.push_back({k, k->dist.at(index)});
         }
       }
 
-      if (r_set.empty() && !min->fixed && min->dist <= heap.top().dist) {
+      if (r_set.empty() && !min->fixed.at(index) && min->dist.at(index) <= heap.top().dist) {
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
-        min->fix({VertexSource::R_SET, r_set.size()});
+	min->fixed.at(index) = true;
         r_set.push_back(min);
       }
     }
 
     for (auto& item : q_set) {
-      if (item.first->dist == item.second && !item.first->fixed) {
-        pushWrap(heap, item.first->node, item.first->dist);
+      if (item.first->dist.at(index) == item.second && !item.first->fixed.at(index)) {
+        pushWrap(heap, item.first->node, item.first->dist.at(index));
       }
     }
     q_set.clear();
   }
 }
+
 
 template<typename GNode,
          typename Graph,
@@ -1649,13 +1239,23 @@ void init_graphAPSP(Graph& graph) {
                    auto& data = graph.getData(n);
                    data.min_in_weight = SSSP::DIST_INFINITY;
                    data.node = n;
-                   data.dist.resize(graph.size());
-                   data.pred.resize(graph.size());
-                   data.fixed.resize(graph.size());
-		   for(GNode index : graph){
-                     data.dist.at(index) = SSSP::DIST_INFINITY;
-		     data.pred.at(index) = 0;
-		     data.fixed.at(index) = false;
+		   if(APSP){
+                     data.dist.resize(graph.size());
+                     data.pred.resize(graph.size());
+                     data.fixed.resize(graph.size());
+		     for(GNode index : graph){
+                       data.dist.at(index) = SSSP::DIST_INFINITY;
+		       data.pred.at(index) = 0;
+		       data.fixed.at(index) = false;
+		     }
+		   }
+		   else{
+                     data.dist.resize(1);
+                     data.pred.resize(1);
+                     data.fixed.resize(1);
+                     data.dist.at(0) = SSSP::DIST_INFINITY;
+                     data.pred.at(0) = 0;
+                     data.fixed.at(0) = false;
 		   }
                  });
 }
@@ -1679,19 +1279,19 @@ void all_pairs_shortest_path(Graph& graph_ref, uint32_t algo, std::string file, 
   auto parallel_loop = [&](GNode source, auto& ctx){
     switch(algo){
       case dijkstra : {
-	  dijkstraAlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+	  dijkstraAlgo<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
           break;
         }
       case serDelta : {
-          serDeltaAlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          serDeltaAlgo<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
           break;
         }
       case serSP1 : {
-          serSP1AlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          serSP1Algo<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
           break;
         }
       case serSP2 : {
-          serSP2AlgoAPSP<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
+          serSP2Algo<GType, GType::Traits::UpdateRequest>(graph_ref, source, pushWrap, edgeRange, source);
           break;
         }
       default : break;
@@ -1733,6 +1333,33 @@ removeExtension( std::string const& filename )
         ? filename
         : std::string( filename.begin(), pivot.base() - 1 );
 }
+
+template <typename GType,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename Traits = typename GType::Traits>
+void verify_and_reportAPSP(Graph& graph, GNode& source, GNode& report, std::string algo_name, uint32_t index = 0) {
+  galois::reportPageAlloc("MeminfoPost");
+
+  std::cout << "Node " << reportNode << " has distance " << graph.getData(report).dist.at(index) << "\n";
+
+  if(algo == serDelta || algo == dijkstra || algo == serSP1 || algo == serSP2){
+    if (!skipVerify) {
+      using SerGType = GraphType<GraphTypes::SerGraphType>;
+      SerGType::Graph graph_verify;
+      galois::graphs::readGraph(graph_verify, filename);
+      for(GNode vertex:graph_verify){ 
+        graph_verify.getData(vertex).dist = graph.getData(vertex).dist.at(index);
+      }
+      if (SerGType::Traits::SSSP::verify(graph_verify, source)) {
+        std::cout << "Verification successful.\n";
+      } else {
+        GALOIS_DIE("Verification failed");
+      }
+    }
+  }
+}
+
 
 template <typename GType,
           typename Graph = typename GType::Graph,
@@ -1780,6 +1407,7 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
   profile.close();
 }
 
+
 int main(int argc, char** argv) {
   using ParGType = GraphType<GraphTypes::ParGraphType>;
   using SerGType = GraphType<GraphTypes::SerGraphType>;
@@ -1797,6 +1425,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
@@ -1817,6 +1446,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
@@ -1834,118 +1464,135 @@ int main(int argc, char** argv) {
       }
       break;
     }
-    // case deltaStepSP1: {
-    //   ParGType::Graph graph;
-    //   ParGType::GNode source, report;
-    //   init_graph<ParGType>(graph, source, report);
-    //   auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-    //   calc_graph_predecessors<ParGType>(graph, edgeRange);
-
-    //   Tmain.start();
-    //   deltaStepAlgoSP1<ParGType, ParGType::Traits::UpdateRequest>(
-    //       graph, source,
-    //       ParGType::Traits::ReqPushWrap(),
-    //       edgeRange);
-    //   Tmain.stop();
-
-    //   verify_and_report<ParGType>(graph, source, report);
-    //   break;
-    // }
     case serDeltaTile: {
-      SerGType::Graph graph;
-      SerGType::GNode source, report;
+      using GType = APSPGType;
+      using Graph = GType::Graph;
+      Graph graph;
+      GType::GNode source, report;
+      auto pushWrap = GType::Traits::SrcEdgeTilePushWrap{graph};
+      auto edgeRange =  GType::Traits::TileRangeFn();
+
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
-        init_graph<SerGType>(graph, source, report);
+        galois::graphs::readGraph(graph, filename);
+        init_graphAPSP<GType>(graph);
+        auto it = graph.begin();
+        std::advance(it, startNode);
+        source = *it;
+        it = graph.begin();
+        std::advance(it, reportNode);
+        report = *it;
 
         Tmain.start();
-        serDeltaAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
+        serDeltaAlgo<GType, GType::Traits::SrcEdgeTile>(
             graph, source,
-            SerGType::Traits::SrcEdgeTilePushWrap{graph},
-            SerGType::Traits::TileRangeFn());
+            pushWrap,
+            edgeRange);
         Tmain.stop();
 
-        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
     }
     case serDelta: {
-      SerGType::Graph graph;
-      SerGType::GNode source, report;
+      using GType = APSPGType;
+      using Graph = GType::Graph;
+      Graph graph;
+      GType::GNode source, report;
+      auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+      auto pushWrap = GType::Traits::ReqPushWrap();
+
       if(APSP){
-        using GType = APSPGType;
-        using Graph = GType::Graph;
-
-        Graph graph_ref;
-
-        galois::graphs::readGraph(graph_ref, filename);
-        auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
-        auto pushWrap = GType::Traits::ReqPushWrap();
-
-        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+        galois::graphs::readGraph(graph, filename);
+        all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
       }
       else{
-        init_graph<SerGType>(graph, source, report);
+        galois::graphs::readGraph(graph, filename);
+        init_graphAPSP<GType>(graph);
+        auto it = graph.begin();
+        std::advance(it, startNode);
+  	source = *it;
+  	it = graph.begin();
+  	std::advance(it, reportNode);
+  	report = *it;
 
         Tmain.start();
-        serDeltaAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+        serDeltaAlgo<GType, GType::Traits::UpdateRequest>(
             graph, source,
-            SerGType::Traits::ReqPushWrap(),
-            SerGType::Traits::OutEdgeRangeFn{graph});
+            pushWrap,
+            edgeRange);
         Tmain.stop();
-
-        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+	
+	verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
     }
     case dijkstraTile: {
-      SerGType::Graph graph;
-      SerGType::GNode source, report;
+      using GType = APSPGType;
+      using Graph = GType::Graph;
+      GType::Graph graph;
+      GType::GNode source, report;
+      auto pushWrap = GType::Traits::SrcEdgeTilePushWrap{graph};
+      auto edgeRange = GType::Traits::TileRangeFn();
+
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
-        init_graph<SerGType>(graph, source, report);
+        galois::graphs::readGraph(graph, filename);
+        init_graphAPSP<GType>(graph);
+        auto it = graph.begin();
+        std::advance(it, startNode);
+        source = *it;
+        it = graph.begin();
+        std::advance(it, reportNode);
+        report = *it;
 
         Tmain.start();
-        dijkstraAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
+        dijkstraAlgo<GType, GType::Traits::SrcEdgeTile>(
             graph, source,
-            SerGType::Traits::SrcEdgeTilePushWrap{graph},
-            SerGType::Traits::TileRangeFn());
+            pushWrap,
+            edgeRange);
         Tmain.stop();
 
-        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
     }
     case dijkstra: {
-      SerGType::Graph graph;
-      SerGType::GNode source, report;
+      using GType = APSPGType;
+      using Graph = GType::Graph;
+      Graph graph;
+      GType::GNode source, report;
+      auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+      auto pushWrap = GType::Traits::ReqPushWrap();
+
       if(APSP){
-        using GType = APSPGType;
-        using Graph = GType::Graph;
-
-        Graph graph_ref;
-
-        galois::graphs::readGraph(graph_ref, filename);
-	auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
-        auto pushWrap = GType::Traits::ReqPushWrap();
-
-        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+        galois::graphs::readGraph(graph, filename);
+        all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
       }
       else{
-        init_graph<SerGType>(graph, source, report);
+        galois::graphs::readGraph(graph, filename);
+        init_graphAPSP<GType>(graph);
+        auto it = graph.begin();
+        std::advance(it, startNode);
+        source = *it;
+        it = graph.begin();
+        std::advance(it, reportNode);
+        report = *it;
 
         Tmain.start();
-        dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+        dijkstraAlgo<GType, GType::Traits::UpdateRequest>(
             graph, source,
-            SerGType::Traits::ReqPushWrap(),
-            SerGType::Traits::OutEdgeRangeFn{graph});
+            pushWrap,
+            edgeRange);
         Tmain.stop();
 
-        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
     }
@@ -1954,6 +1601,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
@@ -1971,6 +1619,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
@@ -1984,64 +1633,69 @@ int main(int argc, char** argv) {
       break;
     }
     case serSP1: {
-      SerGType::Graph graph;
-      SerGType::GNode source, report;
+      using GType = APSPGType;
+      using Graph = GType::Graph;
+      Graph graph;
+      GType::GNode source, report;
+      auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+      auto pushWrap = GType::Traits::ReqPushWrap();
       if(APSP){
-        using GType = APSPGType;
-        using Graph = GType::Graph;
-
-        Graph graph_ref;
-
-        galois::graphs::readGraph(graph_ref, filename);
-	auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
-        auto pushWrap = GType::Traits::ReqPushWrap();
-
-        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+        galois::graphs::readGraph(graph, filename);
+        all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
       }
       else{
-        init_graph<SerGType>(graph, source, report);
-        auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
-        calc_graph_predecessors<SerGType>(graph, edgeRange);
+        galois::graphs::readGraph(graph, filename);
+        init_graphAPSP<GType>(graph);
+        auto it = graph.begin();
+        std::advance(it, startNode);
+        source = *it;
+        it = graph.begin();
+        std::advance(it, reportNode);
+        report = *it;
+	
+        calc_graph_predecessorsAPSP<GType>(graph, edgeRange);
 
         Tmain.start();
-        serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
+        serSP1Algo<GType, GType::Traits::UpdateRequest>(
             graph, source,
-            SerGType::Traits::ReqPushWrap(),
+            pushWrap,
             edgeRange);
         Tmain.stop();
 
-        verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
     }
     case serSP2: {
-      using GType = SerGType;
-      GType::Graph graph;
+      using GType = APSPGType;
+      using Graph = GType::Graph;
+      Graph graph;
       GType::GNode source, report;
+      auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+      auto pushWrap = GType::Traits::ReqPushWrap();
       if(APSP){
-        using GType = APSPGType;
-        using Graph = GType::Graph;
-
-        Graph graph_ref;
-
-        galois::graphs::readGraph(graph_ref, filename);
-	auto edgeRange = GType::Traits::OutEdgeRangeFn{graph_ref};
-        auto pushWrap = GType::Traits::ReqPushWrap();
-
-        all_pairs_shortest_path<GType>(graph_ref, algo, filename, edgeRange, pushWrap);
+        galois::graphs::readGraph(graph, filename);
+        all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
       }
       else{
-        init_graph<GType>(graph, source, report);
-        auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
-        calc_graph_predecessors<GType>(graph, edgeRange);
+        galois::graphs::readGraph(graph, filename);
+        init_graphAPSP<GType>(graph);
+        auto it = graph.begin();
+        std::advance(it, startNode);
+        source = *it;
+        it = graph.begin();
+        std::advance(it, reportNode);
+        report = *it;
+
+        calc_graph_predecessorsAPSP<GType>(graph, edgeRange);
 
         Tmain.start();
         serSP2Algo<GType, GType::Traits::UpdateRequest>(
             graph, source,
-            GType::Traits::ReqPushWrap(),
+            pushWrap,
             edgeRange);
         Tmain.stop();
-        verify_and_report<GType>(graph, source, report, ALGO_NAMES[algo]);
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
     }
@@ -2050,6 +1704,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
@@ -2072,6 +1727,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
@@ -2094,6 +1750,7 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       if(APSP){
         std::cout << "All Pairs Shortest Path implementation is not supported by " << ALGO_NAMES[algo] << std::endl;
+	std::abort();
       }
       else{
         init_graph<ParGType>(graph, source, report);
