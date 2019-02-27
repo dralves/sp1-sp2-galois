@@ -92,6 +92,7 @@ const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep", "deltaStepSP1", "ser
                                   "serDelta",  "dijkstraTile", "dijkstra",
                                   "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E"};
 
+
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
          cll::values(clEnumVal(deltaTile, "deltaTile"),
@@ -145,6 +146,7 @@ struct SerNodeData {
   inline void visit() {}
   inline void explore(VertexContext context = VertexContext()) {}
   inline void fix(VertexContext context = VertexContext()) {}
+  inline void relax(VertexContext context = VertexContext()) {}
 };
 
 template<typename GraphTypes>
@@ -159,6 +161,7 @@ struct ParNodeData {
   inline void visit() {}
   inline void explore(VertexContext context = VertexContext()) {}
   inline void fix(VertexContext context = VertexContext()) {}
+  inline void relax(VertexContext context = VertexContext()) {}
 };
 
 constexpr static const uint32_t DIST_INF = std::numeric_limits<uint32_t>::max() / 2 - 1;
@@ -183,6 +186,7 @@ struct ProfilingNodeData {
   std::atomic<uint64_t> num_explores;
   std::atomic<uint64_t> fixed_usec;
   std::atomic<uint64_t> fixed_idx;
+  std::atomic<uint64_t> num_relaxed;
   VertexContext ctx_explored;
   VertexContext ctx_fixed;
 
@@ -227,6 +231,10 @@ struct ProfilingNodeData {
     }
   }
 
+  inline void relax(VertexContext context = VertexContext()) {
+    num_relaxed++;
+  }
+
   void reset(bool reset_dist = true) {
     pred = 0;
     if (reset_dist) dist = DIST_INF;
@@ -234,6 +242,7 @@ struct ProfilingNodeData {
     min_in_weight = DIST_INF;
     min_out_weight = DIST_INF;
     num_visits = 0;
+    num_relaxed = 0;
     first_visit_usec = 0;
     first_visit_idx = 0;
     last_visit_usec = 0;
@@ -455,6 +464,7 @@ void serDeltaAlgo(Graph& graph, const GNode& source,
 
 template <typename GType,
           typename T,
+          typename Cmp = std::less<typename GType::Traits::Dist>,
           typename P,
           typename R,
           typename Graph = typename GType::Graph,
@@ -485,6 +495,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
   double average_heap_size = 0;
   size_t duplicated_items = 0;
 
+  Cmp cmp;
+
   while (!wl.empty()) {
     ++iter;
     average_heap_size += wl.size();
@@ -510,7 +522,8 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
       const auto newDist = item.dist + graph.getEdgeData(e).dist;
 
-      if (newDist < ddata.dist) {
+      if (cmp(newDist, ddata.dist)) {
+        ddata.relax();
         ddata.dist = newDist;
         pushWrap(wl, dst, newDist);
         heap_pushes++;
@@ -766,14 +779,14 @@ void serSP1Algo(Graph& graph, const GNode& source,
 
 template <typename GType,
           typename T,
+          typename Cmp = std::less<typename GType::Traits::Dist>,
           typename P,
           typename R,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
-void serSP2Algo(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange) {
+void serSP2Algo(Graph& graph, const GNode& source, const P& pushWrap, const R& edgeRange) {
 
   //using Heap = galois::MinHeap<T>;
 
@@ -798,6 +811,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   pushWrap(heap, source, 0);
 
   GNodeData* min = nullptr;
+  Cmp cmp;
 
   // While the heap is not empty
   while (LIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set.empty())) {
@@ -834,19 +848,22 @@ void serSP2Algo(Graph& graph, const GNode& source,
       // Get all the vertices that have edges from z
       for (auto e : edgeRange(z->node)) {
         auto k = &graph.getData(graph.getEdgeDst(e));
-        k->visit();
-        // If k vertex is not fixed, process the edge between z and k.
+
         if (k->fixed) continue;
+        k->visit();
+
+        // If k vertex is not fixed, process the edge between z and k.
         auto z_k_dist = graph.getEdgeData(e).dist;
 
         bool changed = false;
-        if (k->dist > z->dist + z_k_dist) {
+        if (cmp(z->dist + z_k_dist, k->dist)) {
           k->dist = z->dist + z_k_dist;
           changed = true;
+          k->relax();
           if (k->dist < min->dist) min = k;
         }
 
-        if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
+        if (--k->pred <= 0 || cmp(k->dist, (min->dist + k->min_in_weight))) {
           k->fix({VertexSource::R_SET, r_set.size()});
           r_set.push_back(k);
         } else if (changed) {
@@ -854,7 +871,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         }
       }
 
-      if (r_set.empty() && !min->fixed && min->dist <= heap.top().dist) {
+      if (r_set.empty() && !min->fixed && cmp(min->dist, heap.top().dist)) {
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
@@ -967,6 +984,7 @@ void parSP1Algo(Graph& graph,
     }
 
     // If the min element is not fixed
+
     if (!j_data.fixed) {
       // Set the element to fixed
       j_data.fixed = true;
@@ -979,7 +997,6 @@ void parSP1Algo(Graph& graph,
                        galois::loopname("sssp_parsp1_inner"));
     }
   }
-
   galois::runtime::reportStat_Single("SSSP-parSP1", "Outer loop iterations", outer_iter);
   galois::runtime::reportStat_Single("SSSP-parSP1", "Heap pushes", heap_pushes);
   galois::runtime::reportStat_Single("SSSP-parSP1", "Duplicated heap pushes", duplicated_items);
@@ -1301,46 +1318,72 @@ void topoTileAlgo(Graph& graph, const GNode& source) {
   galois::runtime::reportStat_Single("SSSP-topo", "rounds", rounds);
 }
 
+
+struct MatchPathSeparator {
+    bool operator()( char ch ) const {
+        return ch == '/';
+    }
+};
+
+std::string basename( std::string const& pathname) {
+    return std::string(
+        std::find_if( pathname.rbegin(), pathname.rend(),
+                      MatchPathSeparator() ).base(),
+        pathname.end() );
+}
+
+std::string removeExtension( std::string const& filename ) {
+    std::string::const_reverse_iterator
+                        pivot
+            = std::find( filename.rbegin(), filename.rend(), '.' );
+    return pivot == filename.rend()
+        ? filename
+        : std::string( filename.begin(), pivot.base() - 1 );
+}
+
 template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
-void init_graph(Graph& graph, GNode& source, GNode& report, bool reset_dist = true) {
+void init_graph(Graph& graph, GNode& source, GNode& report, bool load_graph = true, bool reset_dist = true) {
 
-  std::cout << "Reading from file: " << filename << std::endl;
-  galois::graphs::readGraph(graph, filename);
-  std::cout << "Read " << graph.size() << " nodes, " << graph.sizeEdges()
-            << " edges" << std::endl;
+  if (load_graph) {
+    std::cout << "Reading from file: " << filename << std::endl;
+    galois::graphs::readGraph(graph, filename);
+    std::cout << "Read " << graph.size() << " nodes, " << graph.sizeEdges()
+              << " edges" << std::endl;
 
-  if (startNode >= graph.size() || reportNode >= graph.size()) {
-    std::cerr << "failed to set report: " << reportNode
-              << " or failed to set source: " << startNode << "\n";
-    assert(0);
-    abort();
+    if (startNode >= graph.size() || reportNode >= graph.size()) {
+      std::cerr << "failed to set report: " << reportNode
+                << " or failed to set source: " << startNode << "\n";
+      assert(0);
+      abort();
+    }
+    auto it = graph.begin();
+    std::advance(it, startNode);
+    source = *it;
+    it     = graph.begin();
+    std::advance(it, reportNode);
+    report = *it;
+
+    size_t approxNodeData = graph.size() * 64;
+    // size_t approxEdgeData = graph.sizeEdges() * sizeof(typename
+    // Graph::edge_data_type) * 2;
+    galois::preAlloc(numThreads +
+                     approxNodeData / galois::runtime::pagePoolSize());
+    galois::reportPageAlloc("MeminfoPre");
+
+    if (algo == deltaStep || algo == deltaTile || algo == serDelta ||
+        algo == serDeltaTile) {
+      std::cout << "INFO: Using delta-step of " << (1 << stepShift) << "\n";
+      std::cout
+          << "WARNING: Performance varies considerably due to delta parameter.\n";
+      std::cout
+          << "WARNING: Do not expect the default to be good for your graph.\n";
+    }
+
   }
 
-  auto it = graph.begin();
-  std::advance(it, startNode);
-  source = *it;
-  it     = graph.begin();
-  std::advance(it, reportNode);
-  report = *it;
-
-  size_t approxNodeData = graph.size() * 64;
-  // size_t approxEdgeData = graph.sizeEdges() * sizeof(typename
-  // Graph::edge_data_type) * 2;
-  galois::preAlloc(numThreads +
-                   approxNodeData / galois::runtime::pagePoolSize());
-  galois::reportPageAlloc("MeminfoPre");
-
-  if (algo == deltaStep || algo == deltaTile || algo == serDelta ||
-      algo == serDeltaTile) {
-    std::cout << "INFO: Using delta-step of " << (1 << stepShift) << "\n";
-    std::cout
-        << "WARNING: Performance varies considerably due to delta parameter.\n";
-    std::cout
-        << "WARNING: Do not expect the default to be good for your graph.\n";
-  }
 
   galois::do_all(galois::iterate(graph),
                  [&](GNode n) {
@@ -1350,38 +1393,6 @@ void init_graph(Graph& graph, GNode& source, GNode& report, bool reset_dist = tr
                  });
 
   graph.getData(source).dist = 0;
-
-  profiling_start = clock_type::now();
-  explored_nodes = 0;
-  fixed_nodes = 0;
-}
-
-struct MatchPathSeparator
-{
-    bool operator()( char ch ) const
-    {
-        return ch == '/';
-    }
-};
-
-std::string
-basename( std::string const& pathname )
-{
-    return std::string(
-        std::find_if( pathname.rbegin(), pathname.rend(),
-                      MatchPathSeparator() ).base(),
-        pathname.end() );
-}
-
-std::string
-removeExtension( std::string const& filename )
-{
-    std::string::const_reverse_iterator
-                        pivot
-            = std::find( filename.rbegin(), filename.rend(), '.' );
-    return pivot == filename.rend()
-        ? filename
-        : std::string( filename.begin(), pivot.base() - 1 );
 }
 
 template <typename GType,
@@ -1405,6 +1416,7 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
   std::string graph_name = removeExtension(basename(filename));
 
   std::string prof_filename = "per_node_profile_" + algo_name + "_" + graph_name + ".csv";
+  std::string summary_filename = "profile_summary__" + algo_name + "_" + graph_name + ".csv";
 
   std::cout << "Outputting profile to file: " << prof_filename;
 
@@ -1415,9 +1427,17 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
   profile << "last_visit_usec;visits_after_fixed;visits_after_explored;first_explored_usec;first_explored_idx;";
   profile << "num_explores;fixed_usec;fixed_idx;fixed_source;fixed_source_size;explored_source;explored_source_size;" << std::endl;
 
+  std::ofstream summary;
+  summary.open(summary_filename);
+  summary << "total_num_visits;total_num_relax" << std::endl;
+  uint64_t num_visits = 0;
+  uint64_t num_relaxed = 0;
+
   for (auto& node : graph) {
     auto& d = graph.getData(node);
     if (d.dist == 2147483646) continue;
+    num_visits += d.num_visits;
+    num_relaxed += d.num_relaxed;
     profile << d.node << ";" << d.pred << ";" << d.dist << ";" << d.fixed << ";" << d.min_in_weight;
     profile << d.num_visits << ";" << d.first_visit_usec << ";" << d.first_visit_idx << ";";
     profile << d.last_visit_usec << ";" << d.visits_after_fixed << ";" << d.visits_after_explored << ";";
@@ -1427,8 +1447,60 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report, std::string a
     profile << d.ctx_explored.vertex_source << ";" << d.ctx_explored.set_size << std::endl;
   }
 
+  summary << num_visits << ";";
+  summary << num_relaxed << ";";
+
+  summary.close();
   profile.close();
 }
+
+// template<typename GType,
+//          typename SSSPFunc,
+//          typename UpdateFunc,
+//          typename WLPushFunc,
+//          typename EdgeRangeFunc>
+// void run_algo(std::string algo_name, bool load_graph, bool run_verification, bool reset_distances) {
+//   using Graph = typename GType::Graph;
+//   using GNode = typename GType::GNode;
+
+//   Graph graph;
+//   GNode source, report;
+
+//   std::cout << "Running " << algo_name << " algorithm" << std::endl;
+//   galois::StatTimer tmain;
+
+//   init_graph<GType>(graph, source, report, load_graph, reset_distances);
+
+//   tmain.start();
+//   profiling_start = clock_type::now();
+//   explored_nodes = 0;
+//   fixed_nodes = 0;
+
+//   SSSPFunc<GType, UpdateFunc>(graph, source, WLPushFunc{graph}, EdgeRangeFunc());
+//   tmain.stop();
+
+//   if (run_verification) {
+//     verify_and_report<GType>(graph, source, report, algo_name);
+//   }
+// }
+
+
+// template<typename GType,
+//          typename SSSPFunc,
+//          typename UpdateFunc,
+//          typename WLPushFunc,
+//          typename EdgeRangeFunc>
+// void run_benchmark(std::string algo_name) {
+
+//   // Do a dry run without verification to warm things up.
+//   run_algo<GType, SSSPFunc, UpdateFunc, WLPushFunc, EdgeRangeFunc>(algo_name, true, false, true);
+
+//   // Run the main algorithm
+//   run_algo<GType, SSSPFunc, UpdateFunc, WLPushFunc, EdgeRangeFunc>(algo_name, false, true, true);
+
+//   // Run a baseline run with al the distances pre_computed.
+//   run_algo<GType, SSSPFunc, UpdateFunc, WLPushFunc, EdgeRangeFunc>(algo_name, false, true, false);
+// }
 
 int main(int argc, char** argv) {
   using ParGType = GraphType<GraphTypes::ParGraphType>;
@@ -1538,8 +1610,22 @@ int main(int argc, char** argv) {
     case dijkstra: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
-      init_graph<SerGType>(graph, source, report);
+      init_graph<SerGType>(graph, source, report, true);
 
+      // Do a dry run to warm up
+      profiling_start = clock_type::now();
+      explored_nodes = 0;
+      fixed_nodes = 0;
+      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+          graph, source,
+          SerGType::Traits::ReqPushWrap(),
+          SerGType::Traits::OutEdgeRangeFn{graph});
+
+      init_graph<SerGType>(graph, source, report, false, true);
+
+      profiling_start = clock_type::now();
+      explored_nodes = 0;
+      fixed_nodes = 0;
       Tmain.start();
       dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
@@ -1549,9 +1635,13 @@ int main(int argc, char** argv) {
 
       verify_and_report<SerGType>(graph, source, report, ALGO_NAMES[algo]);
 
-      init_graph<SerGType>(graph, source, report);
+      init_graph<SerGType>(graph, source, report, false, false);
+
+      profiling_start = clock_type::now();
+      explored_nodes = 0;
+      fixed_nodes = 0;
       Tmain.start();
-      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
+      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest, std::less_equal<typename SerGType::Traits::Dist>>(
           graph, source,
           SerGType::Traits::ReqPushWrap(),
           SerGType::Traits::OutEdgeRangeFn{graph});
@@ -1605,10 +1695,24 @@ int main(int argc, char** argv) {
       using GType = SerGType;
       GType::Graph graph;
       GType::GNode source, report;
-      init_graph<GType>(graph, source, report);
       auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
+      init_graph<GType>(graph, source, report, true);
       calc_graph_predecessors<GType>(graph, edgeRange);
 
+      profiling_start = clock_type::now();
+      explored_nodes = 0;
+      fixed_nodes = 0;
+      serSP2Algo<GType, GType::Traits::UpdateRequest>(
+          graph, source,
+          GType::Traits::ReqPushWrap(),
+          edgeRange);
+
+      init_graph<GType>(graph, source, report, false, true);
+      calc_graph_predecessors<GType>(graph, edgeRange);
+
+      profiling_start = clock_type::now();
+      explored_nodes = 0;
+      fixed_nodes = 0;
       Tmain.start();
       serSP2Algo<GType, GType::Traits::UpdateRequest>(
           graph, source,
@@ -1617,10 +1721,14 @@ int main(int argc, char** argv) {
       Tmain.stop();
       verify_and_report<GType>(graph, source, report, ALGO_NAMES[algo]);
 
-      init_graph<GType>(graph, source, report, false);
+      init_graph<GType>(graph, source, report, false, false);
       calc_graph_predecessors<GType>(graph, edgeRange);
+
+      profiling_start = clock_type::now();
+      explored_nodes = 0;
+      fixed_nodes = 0;
       Tmain.start();
-      serSP2Algo<GType, GType::Traits::UpdateRequest>(
+      serSP2Algo<GType, GType::Traits::UpdateRequest, std::less_equal<typename GType::Traits::Dist>>(
           graph, source,
           GType::Traits::ReqPushWrap(),
           edgeRange);
