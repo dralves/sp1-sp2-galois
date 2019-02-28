@@ -28,6 +28,7 @@
 #include "galois/graphs/LCGraph.h"
 #include "galois/graphs/TypeTraits.h"
 #include "llvm/Support/CommandLine.h"
+#include "time.h"
 
 #include "Lonestar/BoilerPlate.h"
 #include "Lonestar/BFS_SSSP.h"
@@ -74,6 +75,11 @@ static cll::opt<unsigned int>
     APSP("APSP",
               cll::desc("Run All Pairs Shortest Path version of the Algorithm if supported"),
               cll::init(0));
+static cll::opt<unsigned int>
+    VERIFY("verify",
+              cll::desc("Number of sources to verify in All Pairs Shortest Path"),
+              cll::init(2));
+
 
 enum Algo {
   deltaTile = 0,
@@ -126,6 +132,8 @@ static timestamp profiling_start;
 static std::atomic<uint64_t> fixed_nodes;
 static std::atomic<uint64_t> visited_nodes;
 static std::atomic<uint64_t> explored_nodes;
+static std::atomic<uint64_t> heap_operations_global;
+static std::atomic<uint64_t> heap_pushes_global;
 
 enum VertexSource {
   R_SET,
@@ -481,14 +489,19 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
 
   using WL = galois::MinHeap<T>;
   graph.getData(source).dist.at(index) = 0;
+  uint32_t heap_operations = 0;
+  uint32_t heap_pushes = 0;
 
   WL wl;
   pushWrap(wl, source, 0);
+  heap_operations++;
+  heap_pushes++;
 
   while (!wl.empty()) {
 
     T item = wl.top();
     wl.pop();
+    heap_operations++;
 
     auto& item_data = graph.getData(item.src);
     if (item_data.dist.at(index) < item.dist) {
@@ -505,9 +518,13 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
       if (newDist < ddata.dist.at(index)) {
         ddata.dist.at(index) = newDist;
         pushWrap(wl, dst, newDist);
+	heap_operations++;
+	heap_pushes++;
       }
     }
   }
+  heap_operations_global += heap_operations;
+  heap_pushes_global += heap_pushes;
 }
 
 
@@ -653,92 +670,78 @@ template <typename GType,
           typename Traits = typename GType::Traits>
 void serSP2Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange, uint32_t index=0) {
-
   using Heap = galois::MinHeap<T>;
   using Dist = typename Traits::Dist;
-  // The set of nodes which have been fixed but not explored
-
-  size_t nodes_fixed = 0;
-
-  galois::gstl::Vector<GNodeData*> r_set;
-  r_set.reserve(100);
-  std::vector<std::pair<GNodeData*, Dist>> q_set;
-  q_set.reserve(100);
+  uint32_t heap_operations = 0;
+  uint32_t heap_pushes = 0;
 
   Heap heap;
   graph.getData(source).dist.at(index) = 0;
   pushWrap(heap, source, 0);
+  heap_operations++;
+  heap_pushes++;
+  auto d = 0;
 
-  GNodeData* min = nullptr;
+  galois::gstl::Deque<GNode> r_set;
+  galois::gstl::Vector<GNodeData*> q_set;
 
-  // While the heap is not empty
-  while (LIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set.empty())) {
+  while (!heap.empty()) {
+    T j = heap.pop();
+    heap_operations++;
 
-    if (LIKELY(!heap.empty())) {
-      T item = heap.top();
-      GNodeData* item_data = &graph.getData(item.src);
+    auto& j_data = graph.getData(j.src);
 
-      if (item_data->fixed.at(index) || item_data->dist.at(index) < item.dist) {
-        heap.pop();
-        // If we got a min, go do some work.
-        if (!r_set.empty()) goto mainloop;
-        continue;
-      }
-
-      heap.pop();
-      min = item_data;
-      min->fixed.at(index) = true;
-      r_set.push_back(min);
-    }
-
-    if (LIKELY(!heap.empty()) && heap.top().dist == min->dist.at(index)) {
+    if (j_data.dist.at(index) < j.dist) {
       continue;
     }
 
-    mainloop:
-    // Inner loop, go through the all the elements in R
-    while(r_set.size() > 0) {
-      GNodeData* z = r_set.back();
-      r_set.pop_back();
+    if (!j_data.fixed.at(index)) {
+      j_data.fixed.at(index) = true;
+      GNode z = j.src;
+      d = j_data.dist.at(index);
 
-      // Get all the vertices that have edges from z
-      for (auto e : edgeRange(z->node)) {
-        auto k = &graph.getData(graph.getEdgeDst(e));
-        // If k vertex is not fixed, process the edge between z and k.
-        if (k->fixed.at(index)) continue;
-        auto z_k_dist = graph.getEdgeData(e).dist;
+      while(true) {
+        auto& z_data = graph.getData(z);
+        for (auto e : edgeRange(z)) {
+          GNode k = graph.getEdgeDst(e);
+          auto& k_data = graph.getData(k);
+          if (!k_data.fixed.at(index)) {
 
-        bool changed = false;
-        if (k->dist.at(index) > z->dist.at(index) + z_k_dist) {
-          k->dist.at(index) = z->dist.at(index) + z_k_dist;
-          changed = true;
-          if (k->dist.at(index) < min->dist.at(index)) min = k;
+            Dist z_k_dist = graph.getEdgeData(e).dist;
+	    k_data.pred.at(index)--;
+	    auto k_dist = z_data.dist.at(index) + z_k_dist;
+
+            if ((k_data.pred.at(index) <=0) || k_dist <= (d + k_data.min_in_weight)){
+                k_data.fixed.at(index) = true;
+                r_set.push_back(k);
+            }
+
+            if (k_data.dist.at(index) > z_data.dist.at(index) + z_k_dist){
+              k_data.dist.at(index) = z_data.dist.at(index) + z_k_dist;
+
+	      if (!k_data.fixed.at(index)) {
+		q_set.push_back(&k_data);
+              }
+	    }
+          }
         }
 
-        if (--k->pred.at(index) <= 0 || k->dist.at(index) <= (min->dist.at(index) + k->min_in_weight)) {
-	  k->fixed.at(index) = true;
-          r_set.push_back(k);
-        } else if (changed) {
-          q_set.push_back({k, k->dist.at(index)});
-        }
+        if (r_set.empty()) break;
+        z = r_set.front();
+        r_set.pop_front();
       }
 
-      if (r_set.empty() && !min->fixed.at(index) && min->dist.at(index) <= heap.top().dist) {
-        // We're done, but before we break, let's just check whether we have the new min in the q set
-        // That is, if the heap is not empty and the current min is higher than the min in the q
-        // set no point in pushing back to the heap, where it would have to bubble up.
-	min->fixed.at(index) = true;
-        r_set.push_back(min);
+      for (auto& z : q_set) {
+        auto& z_data = *z;
+        pushWrap(heap, z_data.node, z_data.dist.at(index));
+        heap_operations++;
+        heap_pushes++;
       }
+      q_set.clear();
     }
-
-    for (auto& item : q_set) {
-      if (item.first->dist.at(index) == item.second && !item.first->fixed.at(index)) {
-        pushWrap(heap, item.first->node, item.first->dist.at(index));
-      }
-    }
-    q_set.clear();
   }
+  heap_operations_global += heap_operations;
+  heap_pushes_global += heap_pushes;
 }
 
 
@@ -1267,6 +1270,10 @@ template <typename GType,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
 void all_pairs_shortest_path(Graph& graph_ref, uint32_t algo, std::string file, T& edgeRange, P& pushWrap) {
+  using SSSP = typename Traits::SSSP;
+
+  heap_operations_global = 0;
+  heap_pushes_global = 0;
 
   init_graphAPSP<GType>(graph_ref);
   galois::gstl::Vector<GNode> ctx;
@@ -1301,9 +1308,38 @@ void all_pairs_shortest_path(Graph& graph_ref, uint32_t algo, std::string file, 
   galois::for_each(galois::iterate(ctx),
                   parallel_loop,
                   galois::wl<galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>>(),
-                  galois::no_conflicts(),
-                  galois::loopname("All Pairs Shortest Path"));
+                  galois::no_conflicts(), 
+                  galois::loopname("All Pairs Shortest Path run 1"));
 
+  std::cout<< "Total heap operations for run 1 " << heap_operations_global << std::endl;
+  std::cout<< "Total heap pushes for run 1 " << heap_pushes_global << std::endl;
+ 
+
+  heap_operations_global = 0;
+  heap_pushes_global = 0;
+
+  galois::do_all(galois::iterate(graph_ref),
+                 [&graph_ref](GNode n) {
+                   auto& data = graph_ref.getData(n);
+                   if(APSP){
+                     for(GNode index : graph_ref){
+                       data.dist.at(index) = SSSP::DIST_INFINITY;
+                       data.pred.at(index) = 0;
+                       data.fixed.at(index) = false;
+                     }
+                   }
+                 });
+
+  calc_graph_predecessorsAPSP<GType>(graph_ref, edgeRange);
+
+  galois::for_each(galois::iterate(ctx),
+                  parallel_loop,
+                  galois::wl<galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>>(),
+                  galois::no_conflicts(), 
+                  galois::loopname("All Pairs Shortest Path run 2"));
+
+  std::cout<< "Total heap operations for run 2 " << heap_operations_global << std::endl;
+  std::cout<< "Total heap pushes for run 2 " << heap_pushes_global << std::endl;
 }
 
 struct MatchPathSeparator
@@ -1342,9 +1378,10 @@ void verify_and_reportAPSP(Graph& graph, GNode& source, GNode& report, std::stri
   galois::reportPageAlloc("MeminfoPost");
 
   std::cout << "Node " << reportNode << " has distance " << graph.getData(report).dist.at(index) << "\n";
+  bool verify = true;
 
   if(algo == serDelta || algo == dijkstra || algo == serSP1 || algo == serSP2){
-    if (!skipVerify) {
+    if (!skipVerify && !APSP) {
       using SerGType = GraphType<GraphTypes::SerGraphType>;
       SerGType::Graph graph_verify;
       galois::graphs::readGraph(graph_verify, filename);
@@ -1356,6 +1393,31 @@ void verify_and_reportAPSP(Graph& graph, GNode& source, GNode& report, std::stri
       } else {
         GALOIS_DIE("Verification failed");
       }
+    }
+    else if(!skipVerify && APSP){
+      srand(time(NULL));
+      using SerGType = GraphType<GraphTypes::SerGraphType>;
+      SerGType::Graph graph_verify;
+      galois::graphs::readGraph(graph_verify, filename);
+      for(int i=0; i<VERIFY ; i++){
+        index = rand()%graph_verify.size();
+
+        for(GNode vertex:graph_verify)
+          graph_verify.getData(vertex).dist = graph.getData(vertex).dist.at(index);
+	
+        if(SerGType::Traits::SSSP::verify(graph_verify, index)){
+          verify &= true;
+	  std::cout << "Verified graph successfully with source as " << index << std::endl;
+        }
+        else{ 
+          verify &= false;
+	  std::cout << "Verified graph failed with source as " << index << std::endl;
+	}
+      }
+      if(verify == true)
+	std::cout << "Verification successfull" << std::endl;
+      else
+	std::cout << "Verification failed, some graphs in All Pairs Shortest Path have incorrect distances" << std::endl;
     }
   }
 }
@@ -1504,21 +1566,27 @@ int main(int argc, char** argv) {
       GType::GNode source, report;
       auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
       auto pushWrap = GType::Traits::ReqPushWrap();
+      auto it = graph.begin();
+      std::advance(it, startNode);
+      source = *it;
+      it = graph.begin();
+      std::advance(it, reportNode);
+      report = *it;
 
       if(APSP){
         galois::graphs::readGraph(graph, filename);
         all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
+        if(VERIFY > graph.size() && APSP){
+          std::cout << "Number of nodes to verify is greater than Graph size" << std::endl;
+          std::cout << "Graph size: "<< graph.size() << std::endl;
+          std::cout << "Number of nodes to verify specified:  "<< VERIFY << std::endl;
+          GALOIS_DIE();
+        }
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       else{
         galois::graphs::readGraph(graph, filename);
         init_graphAPSP<GType>(graph);
-        auto it = graph.begin();
-        std::advance(it, startNode);
-  	source = *it;
-  	it = graph.begin();
-  	std::advance(it, reportNode);
-  	report = *it;
-
         Tmain.start();
         serDeltaAlgo<GType, GType::Traits::UpdateRequest>(
             graph, source,
@@ -1570,20 +1638,27 @@ int main(int argc, char** argv) {
       GType::GNode source, report;
       auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
       auto pushWrap = GType::Traits::ReqPushWrap();
+      auto it = graph.begin();
+      std::advance(it, startNode);
+      source = *it;
+      it = graph.begin();
+      std::advance(it, reportNode);
+      report = *it;
 
       if(APSP){
         galois::graphs::readGraph(graph, filename);
         all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
+        if(VERIFY > graph.size() && APSP){
+          std::cout << "Number of nodes to verify is greater than Graph size" << std::endl;
+          std::cout << "Graph size: "<< graph.size() << std::endl;
+          std::cout << "Number of nodes to verify specified:  "<< VERIFY << std::endl;
+          GALOIS_DIE();
+        }
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       else{
         galois::graphs::readGraph(graph, filename);
         init_graphAPSP<GType>(graph);
-        auto it = graph.begin();
-        std::advance(it, startNode);
-        source = *it;
-        it = graph.begin();
-        std::advance(it, reportNode);
-        report = *it;
 
         Tmain.start();
         dijkstraAlgo<GType, GType::Traits::UpdateRequest>(
@@ -1591,6 +1666,8 @@ int main(int argc, char** argv) {
             pushWrap,
             edgeRange);
         Tmain.stop();
+        std::cout<< "Total heap operations " << heap_operations_global << std::endl;
+        std::cout<< "Total heap pushes " << heap_pushes_global << std::endl;
 
         verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
@@ -1642,6 +1719,13 @@ int main(int argc, char** argv) {
       if(APSP){
         galois::graphs::readGraph(graph, filename);
         all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
+        if(VERIFY > graph.size() && APSP){
+          std::cout << "Number of nodes to verify is greater than Graph size" << std::endl;
+          std::cout << "Graph size: "<< graph.size() << std::endl;
+          std::cout << "Number of nodes to verify specified:  "<< VERIFY << std::endl;
+          GALOIS_DIE();
+        }
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       else{
         galois::graphs::readGraph(graph, filename);
@@ -1673,20 +1757,26 @@ int main(int argc, char** argv) {
       GType::GNode source, report;
       auto edgeRange = GType::Traits::OutEdgeRangeFn{graph};
       auto pushWrap = GType::Traits::ReqPushWrap();
+      auto it = graph.begin();
+      std::advance(it, startNode);
+      source = *it;
+      it = graph.begin();
+      std::advance(it, reportNode);
+      report = *it;
       if(APSP){
         galois::graphs::readGraph(graph, filename);
         all_pairs_shortest_path<GType>(graph, algo, filename, edgeRange, pushWrap);
+        if(VERIFY > graph.size() && APSP){
+          std::cout << "Number of nodes to verify is greater than Graph size" << std::endl;
+          std::cout << "Graph size: "<< graph.size() << std::endl;
+          std::cout << "Number of nodes to verify specified:  "<< VERIFY << std::endl;
+          GALOIS_DIE();
+        }
+        verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       else{
         galois::graphs::readGraph(graph, filename);
         init_graphAPSP<GType>(graph);
-        auto it = graph.begin();
-        std::advance(it, startNode);
-        source = *it;
-        it = graph.begin();
-        std::advance(it, reportNode);
-        report = *it;
-
         calc_graph_predecessorsAPSP<GType>(graph, edgeRange);
 
         Tmain.start();
@@ -1695,6 +1785,8 @@ int main(int argc, char** argv) {
             pushWrap,
             edgeRange);
         Tmain.stop();
+        std::cout<< "Total heap operations " << heap_operations_global << std::endl;
+        std::cout<< "Total heap pushes " << heap_pushes_global << std::endl;
         verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
