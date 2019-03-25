@@ -175,6 +175,8 @@ struct APSPNodeData {
   uint32_t min_out_weight;
 };
 
+uint32_t global_min_in_weight;
+
 constexpr static const uint32_t DIST_INF = std::numeric_limits<uint32_t>::max() / 2 - 1;
 
 template<typename GraphTypes>
@@ -558,6 +560,9 @@ void calc_graph_predecessorsAPSP(typename GType::Graph& graph, R& edgeRange) {
       auto& k_data = graph.getData(graph.getEdgeDst(edge));
       k_data.pred.at(0)++;
       k_data.min_in_weight = std::min(k_data.min_in_weight, edge_dist);
+
+      global_min_in_weight = std::min(k_data.min_in_weight,global_min_in_weight);
+
       if (v_data.min_out_weight > edge_dist) {
         v_data.min_out_weight = edge_dist;
       }
@@ -657,6 +662,9 @@ void serSP2Algo(Graph& graph, const GNode& source,
   using Heap = galois::MinHeap<T>;
   using Dist = typename Traits::Dist;
   // The set of nodes which have been fixed but not explored
+  uint32_t heap_operations = 0;
+  uint32_t heap_pushes = 0;
+  uint32_t heap_duplicates = 0;
 
   size_t nodes_fixed = 0;
 
@@ -668,6 +676,8 @@ void serSP2Algo(Graph& graph, const GNode& source,
   Heap heap;
   graph.getData(source).dist.at(index) = 0;
   pushWrap(heap, source, 0);
+  heap_pushes++;
+  heap_operations++;
 
   GNodeData* min = nullptr;
 
@@ -680,18 +690,21 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
       if (item_data->fixed.at(index) || item_data->dist.at(index) < item.dist) {
         heap.pop();
+	heap_operations++;
+        heap_duplicates++;
         // If we got a min, go do some work.
         if (!r_set.empty()) goto mainloop;
         continue;
       }
 
       heap.pop();
+      heap_operations++;
       min = item_data;
       min->fixed.at(index) = true;
       r_set.push_back(min);
     }
 
-    if (LIKELY(!heap.empty()) && heap.top().dist == min->dist.at(index)) {
+    if (LIKELY(!heap.empty()) && (heap.top().dist < (min->dist.at(index) + global_min_in_weight))) {
       continue;
     }
 
@@ -735,10 +748,15 @@ void serSP2Algo(Graph& graph, const GNode& source,
     for (auto& item : q_set) {
       if (item.first->dist.at(index) == item.second && !item.first->fixed.at(index)) {
         pushWrap(heap, item.first->node, item.first->dist.at(index));
+        heap_pushes++;
+	heap_operations++;
       }
     }
     q_set.clear();
   }
+  std::cout << "Number of Heap pushes: " << heap_pushes << std::endl;
+  std::cout << "Number of Heap duplicates: " << heap_duplicates << std::endl;
+  std::cout << "Total number of Heap operations: " << heap_operations << std::endl;
 }
 
 
@@ -1258,6 +1276,7 @@ void init_graphAPSP(Graph& graph) {
                      data.fixed.at(0) = false;
 		   }
                  });
+  global_min_in_weight = SSSP::DIST_INFINITY;
 }
 
 template <typename GType,
@@ -1695,6 +1714,7 @@ int main(int argc, char** argv) {
             pushWrap,
             edgeRange);
         Tmain.stop();
+        //std::cout << "Global min in weight: " << global_min_in_weight << std::endl;
         verify_and_reportAPSP<GType>(graph, source, report, ALGO_NAMES[algo]);
       }
       break;
