@@ -184,8 +184,9 @@ struct BFS_SSSP {
 
   struct not_consistent {
     Graph& g;
+    int index;
     std::atomic<bool>& refb;
-    not_consistent(Graph& g, std::atomic<bool>& refb) : g(g), refb(refb) {}
+    not_consistent(Graph& g, int index, std::atomic<bool>& refb) : g(g), index(index), refb(refb) {}
 
     template <bool useWt, typename iiTy>
     Dist getEdgeWeight(iiTy ii,
@@ -200,13 +201,13 @@ struct BFS_SSSP {
     }
 
     void operator()(typename Graph::GraphNode node) const {
-      Dist sd = g.getData(node).dist;
+      Dist sd = g.getData(node).source_data_at(index).dist;
       if (sd == DIST_INFINITY)
         return;
 
       for (auto ii : g.edges(node)) {
         auto dst = g.getEdgeDst(ii);
-        Dist dd  = g.getData(dst).dist;
+        Dist dd  = g.getData(dst).source_data_at(index).dist;
         Dist ew  = getEdgeWeight<USE_EDGE_WT>(ii);
         if (dd > sd + ew) {
           std::cout << "Wrong label: " << dd << ", on node: " << dst
@@ -221,12 +222,13 @@ struct BFS_SSSP {
 
   struct max_dist {
     Graph& g;
+    int index;
     galois::GReduceMax<Dist>& m;
 
-    max_dist(Graph& g, galois::GReduceMax<Dist>& m) : g(g), m(m) {}
+    max_dist(Graph& g, int index, galois::GReduceMax<Dist>& m) : g(g), index(index), m(m) {}
 
     void operator()(typename Graph::GraphNode node) const {
-      Dist d = g.getData(node).dist;
+      Dist d = g.getData(node).source_data_at(index).dist;
       if (d == DIST_INFINITY)
         return;
       m.update(d);
@@ -237,15 +239,15 @@ struct BFS_SSSP {
   //  Dist get_node_dist(Graph& graph, GNode node);
 
   static bool verify(Graph& graph, GNode source) {
-    if (graph.getData(source).dist != 0) {
+    if (graph.getData(source).source_data_at(source).dist != 0) {
       std::cerr << "ERROR: source has non-zero dist value == "
-                << graph.getData(source).dist << std::endl;
+                << graph.getData(source).source_data_at(source).dist << std::endl;
       return false;
     }
 
     std::atomic<size_t> notVisited(0);
-    galois::do_all(galois::iterate(graph), [&notVisited, &graph](GNode node) {
-      if (graph.getData(node).dist >= DIST_INFINITY)
+    galois::do_all(galois::iterate(graph), [&notVisited, &graph, &source](GNode node) {
+        if (graph.getData(node).source_data_at(source).dist >= DIST_INFINITY)
         ++notVisited;
     });
 
@@ -255,7 +257,7 @@ struct BFS_SSSP {
                    "strongly connected\n";
 
     std::atomic<bool> not_c(false);
-    galois::do_all(galois::iterate(graph), not_consistent(graph, not_c));
+    galois::do_all(galois::iterate(graph), not_consistent(graph, source, not_c));
 
     if (not_c) {
       std::cerr << "node found with incorrect distance\n";
@@ -263,7 +265,7 @@ struct BFS_SSSP {
     }
 
     galois::GReduceMax<Dist> m;
-    galois::do_all(galois::iterate(graph), max_dist(graph, m));
+    galois::do_all(galois::iterate(graph), max_dist(graph, source, m));
 
     std::cout << "max dist: " << m.reduce() << "\n";
 
