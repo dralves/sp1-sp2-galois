@@ -92,7 +92,7 @@ enum Algo {
   serSP2,
 };
 
-const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep", "deltaStepSP1", "serDeltaTile",
+const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep", "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
                                   "topo", "topoTile", "serSP1", "serSP2"};
 
@@ -103,7 +103,8 @@ static cll::opt<Algo>
                      clEnumVal(serDeltaTile, "serDeltaTile"),
                      clEnumVal(serDelta, "serDelta"),
                      clEnumVal(dijkstraTile, "dijkstraTile"),
-                     clEnumVal(dijkstra, "dijkstra"), clEnumVal(topo, "topo"),
+                     clEnumVal(dijkstra, "dijkstra"),
+                     clEnumVal(topo, "topo"),
                      clEnumVal(topoTile, "topoTile"),
                      clEnumVal(serSP1, "serSP1"),
                      clEnumVal(serSP2, "serSP2"),
@@ -191,7 +192,7 @@ struct NodeData {
   int size;
   NodeConstants node_constants;
 
-  inline SourceData& source_data_at(int index = 0);
+  inline SourceData& source_data_at(int index);
   inline void reset(bool reset_dist = true);
 
   inline uint32_t dist_at(int index = 0) {
@@ -220,10 +221,7 @@ struct NodeData<SourceData, true> {
   int size;
   NodeConstants node_constants;
   SourceData source_data;
-    // For non APSP runs, keep a reference to the first element's
-  // distance to make other graphs happy.
-  typename SourceDataType::Dist dist;
-  inline SourceData& source_data_at(int index = 0);
+  inline SourceData& source_data_at(int index);
   inline void reset(bool reset_dist = true);
   NodeData(int size_ = 1);
 };
@@ -251,9 +249,7 @@ struct NodeData<SourceData, false> {
   int size;
   NodeConstants node_constants;
   std::unique_ptr<SourceData[]> source_data;
-  // Retain 'dist' to appease the other algorithms which expect this field
-  typename SourceDataType::Dist dist;
-  inline SourceData& source_data_at(int index = 0);
+  inline SourceData& source_data_at(int index);
   inline void reset(bool reset_dist = true);
   NodeData(int size_);
 };
@@ -324,14 +320,10 @@ struct NodeData<ProfilingSourceData, true> {
   int size;
   NodeConstants node_constants;
   std::unique_ptr<ProfilingSourceData[]> source_data;
-  // For non APSP runs, keep a reference to the first element's
-  // distance to make other graphs happy.
-  std::atomic<uint32_t> dist;
   typedef ProfilingSourceData SourceDataType;
 
   NodeData(int size_ = 1) : size(size_),
                             source_data(new ProfilingSourceData[size]) {
-    dist = DIST_INF;
     reset();
   }
 
@@ -380,7 +372,7 @@ struct NodeData<ProfilingSourceData, true> {
 
   inline void reset(bool reset_dist = true) {
     for (int i = 0; i < size; i++) {
-      source_data[i].reset();
+      source_data[i].reset(reset_dist);
     }
   }
 };
@@ -818,11 +810,10 @@ template <typename Graph,
 void dijkstraAlgo(Graph& graph,
                   const GNode& source,
                   const P& pushWrap,
-                  const R& edgeRange,
-                  uint32_t index = 0) {
+                  const R& edgeRange) {
 
   using WL = galois::MinHeap<T>;
-  graph.getData(source).source_data_at(index).dist = 0;
+  graph.getData(source).source_data_at(source).dist = 0;
 
   WL wl;
   pushWrap(wl, source, 0);
@@ -832,21 +823,29 @@ void dijkstraAlgo(Graph& graph,
     T item = wl.top();
     wl.pop();
 
-    auto& item_data = graph.getData(item.src).source_data_at(index);
+    auto& item_data = graph.getData(item.src).source_data_at(source);
     if (item_data.dist < item.dist) {
       continue;
     }
 
+    std::cout << "Pop: " << item.src << " dist: " << item.dist << std::endl;
     for (auto e : edgeRange(item)) {
 
       GNode dst   = graph.getEdgeDst(e);
-      auto& ddata = graph.getData(dst).source_data_at(index);
+      auto& ddata = graph.getData(dst).source_data_at(source);
+      auto& edata =  graph.getEdgeData(e);
+      std::cout << "Edge: " << item.src << " - " << edata << " -> " << dst << std::endl;
 
-      const auto newDist = item.dist + graph.getEdgeData(e);
+      const auto newDist = item.dist + edata;
+      //      std::cout << "Node: " << dst << " Current dist: " << item.dist << " Edge: " << *e << " Edge dist: " << graph.getEdgeData(e) << std::endl;
 
       if (newDist < ddata.dist) {
+        //        std::cout << "Setting " << dst << " to " << newDist << std::endl;
         ddata.dist = newDist;
+        std::cout << "R&P: " << dst << " new dist: " << newDist << std::endl;
         pushWrap(wl, dst, newDist);
+      } else {
+        std::cout << "Skip: " << dst << " new: " << newDist << "old: " << item.dist << std::endl;
       }
     }
   }
@@ -870,81 +869,16 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
   virtual void do_run(GNode source) {
     if (source == -1) source = this->source;
     dijkstraAlgo<Graph, T>(graph, source, pw, er);
+    for (int i = 0; i < 32; i++) {
+      auto& ndata = graph.getData(i);
+      std::cout << "Source[" << source << "]: Node[" << ndata.node_constants.node << "]: " << ndata.source_data_at(source).dist << std::endl;
+    }
   }
 
   Graph& graph;
   PushWrap pw;
   EdgeRange er;
 };
-
-template <typename Graph,
-          typename T,
-          typename P,
-          typename R,
-          typename Traits = GraphTraits<Graph>>
-void serSP1Algo(Graph& graph,
-                const GNode& source,
-                const P& pushWrap,
-                const R& edgeRange,
-                uint32_t index = 0) {
-  using Heap = galois::MinHeap<T>;
-
-  Heap heap;
-  graph.getData(source).source_data_at(index) = 0;
-  pushWrap(heap, source, 0);
-
-  // The set of nodes which have been fixed but not explored
-  galois::gstl::Vector<GNode> r_set;
-
-  // While the heap is not empty
-  while (!heap.empty()) {
-    // Get the min element from the heap.
-    T j = heap.pop();
-
-    auto& j_data = graph.getData(j.src).source_data_at(index);
-
-    if (j_data.dist < j.dist) {
-      continue;
-    }
-
-    // If the min element is not fixed
-    if (!j_data.fixed) {
-      // Set the element to fixed
-      j_data.fixed = true;
-      GNode z = j.src;
-
-      // Inner loop, go through the all the elements in R
-      while(true) {
-        auto& z_data = graph.getData(z).source_data_at(index);
-        // Get all the vertices that have edges from z
-        for (auto e : edgeRange(z)) {
-          GNode k = graph.getEdgeDst(e);
-          auto& k_data = graph.getData(k).source_data_at(index);
-          // If k vertex is not fixed, process the edge between z and k.
-          if (!k_data.fixed){
-            auto z_k_dist = graph.getEdgeData(e);
-            k_data.pred--;
-            if (k_data.pred <= 0) {
-	      k_data.fixed = true;
-              r_set.push_back(k);
-            }
-            if (k_data.dist > z_data.dist + z_k_dist) {
-              k_data.dist = z_data.dist + z_k_dist;
-              if (!k_data.fixed) {
-                pushWrap(heap, k_data.node, k_data.dist);
-              }
-            }
-          }
-        }
-
-        if (r_set.empty()) break;
-        z = r_set.back();
-        r_set.pop_back();
-      }
-    }
-  }
-}
-
 
 template <typename Graph,
           typename T,
@@ -1068,7 +1002,7 @@ class SerSP2AlgoRunner : public GraphAlgoBase<Graph, T> {
 
   virtual void do_run(GNode source) {
     if (source == -1) source = this->source;
-    serSP2Algo<Graph, T>(graph, source, pw, er);
+    serSP2Algo<Graph, T>(graph, source, pw, er, source);
   }
 
   Graph& graph;
@@ -1234,7 +1168,7 @@ void run_benchmark(AlgoRunner& runner) {
   runner.init();
 
   // Do a dry run without verification to warm things up.
-  runner.run("init");
+  //runner.run("init");
   // Reset everything before the main run.
   runner.reset();
 
@@ -1243,8 +1177,8 @@ void run_benchmark(AlgoRunner& runner) {
   runner.verify();
 
   // Reset everything but the distances for a final baseline run.
-  runner.reset(false);
-  runner.run("baseline");
+  //runner.reset(false);
+  //runner.run("baseline");
 }
 
 
@@ -1274,13 +1208,13 @@ int main(int argc, char** argv) {
     }
     case dijkstra: {
       if (!apsp && !prof) {
-        DijkstraAlgoRunner<ParallelSSGraph> runner;
+        DijkstraAlgoRunner<SerialSSGraph> runner;
         run_benchmark(runner);
       } else if (!apsp && prof) {
         DijkstraAlgoRunner<ProfilingGraph> runner;
         run_benchmark(runner);
       } else if (apsp && !prof) {
-        DijkstraAlgoRunner<ParallelASGraph> runner;
+        DijkstraAlgoRunner<SerialASGraph> runner;
         run_benchmark(runner);
       } else {
         std::abort();
@@ -1289,13 +1223,13 @@ int main(int argc, char** argv) {
     }
     case serSP2: {
       if (!apsp && !prof) {
-        SerSP2AlgoRunner<ParallelSSGraph> runner;
+        SerSP2AlgoRunner<SerialSSGraph> runner;
         run_benchmark(runner);
       } else if (!apsp && prof) {
         SerSP2AlgoRunner<ProfilingGraph> runner;
         run_benchmark(runner);
       } else if (apsp && !prof) {
-        SerSP2AlgoRunner<ParallelASGraph> runner;
+        SerSP2AlgoRunner<SerialASGraph> runner;
         run_benchmark(runner);
       } else {
         std::abort();
