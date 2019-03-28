@@ -47,22 +47,29 @@ static Policy& getPolicy() {
 
 } // namespace
 
-bool galois::runtime::LL::bindThreadToProcessor(int id) { return false; }
 
-unsigned galois::runtime::LL::getProcessorForThread(int id) { return id; }
+std::pair<machineTopoInfo, std::vector<threadTopoInfo>>
+galois::substrate::getHWTopo() {
+  machineTopoInfo retMTI;
 
-unsigned galois::runtime::LL::getMaxThreads() { return getPolicy().numCpus; }
+  retMTI.maxSockets   = getPolicy().numCpus * 2;
+  retMTI.maxThreads   = getPolicy().numCpus * 2;
+  retMTI.maxCores     = getPolicy().numCpus;
+  retMTI.maxNumaNodes = 1;
 
-unsigned galois::runtime::LL::getMaxCores() { return getPolicy().numCpus; }
+  std::vector<threadTopoInfo> retTTI;
+  retTTI.reserve(retMTI.maxThreads);
 
-unsigned galois::runtime::LL::getMaxSockets() { return getPolicy().numCpus; }
+   for (unsigned i = 0; i < retMTI.maxThreads; ++i) {
+     unsigned pid = i;
+     retTTI.push_back(threadTopoInfo{i, pid, pid, pid, pid});
+   }
+  return std::make_pair(retMTI, retTTI);
+}
 
-unsigned galois::runtime::LL::getSocketForThread(int id) { return id; }
 
-unsigned galois::runtime::LL::getMaxSocketForThread(int id) { return id; }
-
-bool galois::runtime::LL::isSocketLeader(int id) { return true; }
-
-unsigned galois::runtime::LL::getLeaderForThread(int id) { return id; }
-
-unsigned galois::runtime::LL::getLeaderForSocket(int id) { return id; }
+//! binds current thread to OS HW context "proc"
+bool galois::substrate::bindThreadSelf(unsigned osContext) {
+  galois::gWarn("No cpu affinity on Cygwin.  Performance will be bad.");
+  return false;
+}

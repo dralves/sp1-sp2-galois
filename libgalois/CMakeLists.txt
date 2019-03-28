@@ -14,9 +14,9 @@ set(sources
         src/Statistics.cpp
         src/Barrier.cpp
         src/Barrier_Counting.cpp
-        src/Barrier_Dissemination.cpp 
+        src/Barrier_Dissemination.cpp
         src/Barrier_MCS.cpp
-        src/Barrier_Topo.cpp 
+        src/Barrier_Topo.cpp
         src/Barrier_Pthread.cpp
         src/Barrier_Simple.cpp
         src/gIO.cpp
@@ -26,7 +26,6 @@ set(sources
         src/Profile.cpp
         src/EnvCheck.cpp
         src/PerThreadStorage.cpp
-        src/HWTopoLinux.cpp
         src/Termination.cpp
         src/NumaMem.cpp
         src/PageAlloc.cpp
@@ -38,6 +37,12 @@ set(sources
         src/GraphHelpers.cpp
         src/ParaMeter.cpp
 )
+
+if (APPLE)
+  list(APPEND sources experimental/src/HWTopoDarwin.cpp)
+else()
+  list(APPEND sources src/HWTopoLinux.cpp)
+endif()
 
 add_library(galois_shmem STATIC ${sources})
 target_include_directories(galois_shmem PUBLIC
@@ -68,8 +73,7 @@ add_library(galois_shmem_obj OBJECT ${sources})
 target_include_directories(galois_shmem_obj PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-set_target_properties (galois_shmem_obj PROPERTIES 
-  INTERFACE_POSITION_INDEPENDENT_CODE On 
+set_target_properties (galois_shmem_obj PROPERTIES
+  INTERFACE_POSITION_INDEPENDENT_CODE On
   POSITION_INDEPENDENT_CODE On
 )
-
