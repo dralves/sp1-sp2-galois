@@ -222,7 +222,7 @@ struct NodeData<SourceData, true> {
   SourceData source_data;
     // For non APSP runs, keep a reference to the first element's
   // distance to make other graphs happy.
-  typename SourceDataType::Dist& dist;
+  typename SourceDataType::Dist dist;
   inline SourceData& source_data_at(int index = 0);
   inline void reset(bool reset_dist = true);
   NodeData(int size_ = 1);
@@ -240,7 +240,7 @@ inline void NodeData<SourceData, true>::reset(bool reset_dist) {
 
 template<typename SourceData>
 NodeData<SourceData, true>::NodeData(int size_)
-    : size(size_), dist(source_data_at(0).dist) {
+    : size(size_) {
   source_data.node_constants = &node_constants;
   reset();
 }
@@ -252,7 +252,7 @@ struct NodeData<SourceData, false> {
   NodeConstants node_constants;
   std::unique_ptr<SourceData[]> source_data;
   // Retain 'dist' to appease the other algorithms which expect this field
-  typename SourceDataType::Dist& dist;
+  typename SourceDataType::Dist dist;
   inline SourceData& source_data_at(int index = 0);
   inline void reset(bool reset_dist = true);
   NodeData(int size_);
@@ -279,6 +279,7 @@ NodeData<SourceData, false>::NodeData(int size_)
 }
 
 struct ProfilingSourceData {
+  typedef std::atomic<uint32_t> Dist;
   NodeConstants* node_constants;
   std::atomic<int> pred;
   std::atomic<uint32_t> dist;
@@ -325,12 +326,12 @@ struct NodeData<ProfilingSourceData, true> {
   std::unique_ptr<ProfilingSourceData[]> source_data;
   // For non APSP runs, keep a reference to the first element's
   // distance to make other graphs happy.
-  std::atomic<uint32_t>& dist;
+  std::atomic<uint32_t> dist;
   typedef ProfilingSourceData SourceDataType;
 
   NodeData(int size_ = 1) : size(size_),
-                            source_data(new ProfilingSourceData[size]),
-                            dist(source_data[0].dist){
+                            source_data(new ProfilingSourceData[size]) {
+    dist = DIST_INF;
     reset();
   }
 
@@ -631,7 +632,14 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
   }
 
   virtual bool do_verify() {
-    return GraphTraits<Graph>::SSSP::verify(graph, this->source);
+    if (!apsp) {
+      return GraphTraits<Graph>::SSSP::verify(graph, this->source);
+    } else {
+      std::cout << "Running APSP verification" << std::endl;
+      bool success = GraphTraits<Graph>::SSSP::verify(graph, this->source);
+      std::cout << "Base source verified" << success << std::endl;
+      return GraphTraits<Graph>::SSSP::verify(graph, 10);
+    }
   }
 
   virtual void write_profile(std::ofstream& profile, uint32_t index) {
