@@ -25,6 +25,7 @@
 #include <boost/iterator/counting_iterator.hpp>
 #include <cassert>
 #include <vector>
+#include <iostream>
 
 namespace galois {
 namespace graphs {
@@ -136,6 +137,7 @@ uint32_t determine_block_division(uint32_t numDivisions,
 // in 2 different translation units; otherwise it should be fine
 // If inline is used, then apparently you cannot use typedefs, so get rid
 // of those if the need arises.
+
 template <typename PrefixSumType, typename NodeType = uint64_t>
 auto divideNodesBinarySearch(
     NodeType numNodes, uint64_t numEdges, size_t nodeWeight, size_t edgeWeight,
