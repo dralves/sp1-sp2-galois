@@ -35,7 +35,7 @@
 #include <fstream>
 #include <iostream>
 #include <unordered_set>
-
+#include <cstdlib>
 
 #ifndef NDEBUG
 #define D(x) x
@@ -251,7 +251,6 @@ struct NodeData<SourceData, false> {
   std::unique_ptr<SourceData[]> source_data;
   inline SourceData& source_data_at(int index);
   inline void reset(bool reset_dist = true);
-  NodeData(int size_);
 };
 
 template<typename SourceData>
@@ -261,16 +260,12 @@ SourceData& NodeData<SourceData, false>::source_data_at(int index) {
 
 template<typename SourceData>
 inline void NodeData<SourceData, false>::reset(bool reset_dist) {
-  for (int i = 0; i < size; i++) {
-    source_data_at(i).reset(reset_dist);
+  if (!source_data) {
+    source_data.reset(new SourceData[size]);
   }
-}
-
-template<typename SourceData>
-NodeData<SourceData, false>::NodeData(int size_)
-    : size(size_), source_data(new SourceData[size]) {
   for (int i = 0; i < size; i++) {
     source_data_at(i).node_constants = &node_constants;
+    source_data_at(i).reset(reset_dist);
   }
 }
 
@@ -396,12 +391,12 @@ typedef typename galois::graphs::LC_CSR_Graph<NodeData<ParSourceData, true>,
 ::with_no_lockable<true>
 ::type::with_numa_alloc<true>::type ParallelSSGraph;
 
-typedef typename galois::graphs::LC_CSR_Graph<NodeData<SerSourceData, true>,
+typedef typename galois::graphs::LC_CSR_Graph<NodeData<SerSourceData, false>,
                                               uint32_t>
 ::with_no_lockable<true>::type
 ::with_numa_alloc<true>::type SerialASGraph;
 
-typedef typename galois::graphs::LC_CSR_Graph<NodeData<ParSourceData, true>,
+typedef typename galois::graphs::LC_CSR_Graph<NodeData<ParSourceData, false>,
                                               uint32_t>
 ::with_no_lockable<true>
 ::type::with_numa_alloc<true>::type ParallelASGraph;
@@ -429,10 +424,9 @@ struct GraphTraits {
 
 
 struct MatchPathSeparator {
-    bool operator()( char ch ) const
-    {
-        return ch == '/';
-    }
+  bool operator()( char ch ) const {
+    return ch == '/';
+  }
 };
 
 std::string basename( std::string const& pathname ) {
@@ -608,6 +602,8 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
                    [&](GNode n) {
                      auto& data = graph.getData(n);
                      data.node_constants.node = n;
+                     if (!apsp && data.size != 1) GALOIS_DIE("Not APSP, only need one source data per node");
+                     if (apsp) data.size = graph.size();
                      data.reset(reset_distances);
                    });
   }
@@ -627,10 +623,10 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
     if (!apsp) {
       return GraphTraits<Graph>::SSSP::verify(graph, this->source);
     } else {
-      std::cout << "Running APSP verification" << std::endl;
-      bool success = GraphTraits<Graph>::SSSP::verify(graph, this->source);
-      std::cout << "Base source verified" << success << std::endl;
-      return GraphTraits<Graph>::SSSP::verify(graph, 10);
+      GraphTraits<Graph>::SSSP::verify(graph, this->source);
+      int random_node  = rand() % graph.size();
+      std::cout << "Randomly veryfying node: " << random_node << std::endl;
+      return GraphTraits<Graph>::SSSP::verify(graph, random_node);
     }
   }
 
@@ -828,13 +824,13 @@ void dijkstraAlgo(Graph& graph,
       continue;
     }
 
-    std::cout << "Pop: " << item.src << " dist: " << item.dist << std::endl;
+    // std::cout << "Pop: " << item.src << " dist: " << item.dist << std::endl;
     for (auto e : edgeRange(item)) {
 
       GNode dst   = graph.getEdgeDst(e);
       auto& ddata = graph.getData(dst).source_data_at(source);
       auto& edata =  graph.getEdgeData(e);
-      std::cout << "Edge: " << item.src << " - " << edata << " -> " << dst << std::endl;
+      // std::cout << "Edge: " << item.src << " - " << edata << " -> " << dst << std::endl;
 
       const auto newDist = item.dist + edata;
       //      std::cout << "Node: " << dst << " Current dist: " << item.dist << " Edge: " << *e << " Edge dist: " << graph.getEdgeData(e) << std::endl;
@@ -842,10 +838,10 @@ void dijkstraAlgo(Graph& graph,
       if (newDist < ddata.dist) {
         //        std::cout << "Setting " << dst << " to " << newDist << std::endl;
         ddata.dist = newDist;
-        std::cout << "R&P: " << dst << " new dist: " << newDist << std::endl;
+        // std::cout << "R&P: " << dst << " new dist: " << newDist << std::endl;
         pushWrap(wl, dst, newDist);
       } else {
-        std::cout << "Skip: " << dst << " new: " << newDist << "old: " << item.dist << std::endl;
+        // std::cout << "Skip: " << dst << " new: " << newDist << "old: " << item.dist << std::endl;
       }
     }
   }
@@ -869,10 +865,10 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
   virtual void do_run(GNode source) {
     if (source == -1) source = this->source;
     dijkstraAlgo<Graph, T>(graph, source, pw, er);
-    for (int i = 0; i < 32; i++) {
-      auto& ndata = graph.getData(i);
-      std::cout << "Source[" << source << "]: Node[" << ndata.node_constants.node << "]: " << ndata.source_data_at(source).dist << std::endl;
-    }
+    // for (int i = 0; i < 32; i++) {
+    //   auto& ndata = graph.getData(i);
+    //   std::cout << "Source[" << source << "]: Node[" << ndata.node_constants.node << "]: " << ndata.source_data_at(source).dist << std::endl;
+    // }
   }
 
   Graph& graph;
@@ -887,7 +883,7 @@ template <typename Graph,
           typename Traits = GraphTraits<Graph>,
           typename Cmp = std::less<typename Traits::Dist>>
 void serSP2Algo(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange, uint32_t index=0) {
+                const P& pushWrap, const R& edgeRange) {
 
   using GNodeData =  typename Traits::NodeData;
   using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
@@ -905,9 +901,9 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
   GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
 
-  Heap heap(gc);
+  Heap heap(gc, source);
   pushWrap(heap, source, 0);
-  graph.getData(source).source_data_at(index).dist = 0;
+  graph.getData(source).source_data_at(source).dist = 0;
 
   SourceData* min = nullptr;
   Cmp cmp;
@@ -918,7 +914,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
     if (LIKELY(!heap.empty())) {
       T item = heap.top();
       GNodeData& ndata =  graph.getData(item.src);
-      SourceData* sdata = &ndata.source_data_at(index);
+      SourceData* sdata = &ndata.source_data_at(source);
 
       if (sdata->fixed || sdata->dist < item.dist) {
         heap.pop();
@@ -945,7 +941,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
       // Get all the vertices that have edges from z
       for (auto e : edgeRange(z->node_constants->node)) {
-        SourceData* k = &graph.getData(graph.getEdgeDst(e)).source_data_at(index);
+        SourceData* k = &graph.getData(graph.getEdgeDst(e)).source_data_at(source);
 
         if (k->fixed) continue;
 
@@ -1002,7 +998,7 @@ class SerSP2AlgoRunner : public GraphAlgoBase<Graph, T> {
 
   virtual void do_run(GNode source) {
     if (source == -1) source = this->source;
-    serSP2Algo<Graph, T>(graph, source, pw, er, source);
+    serSP2Algo<Graph, T>(graph, source, pw, er);
   }
 
   Graph& graph;
