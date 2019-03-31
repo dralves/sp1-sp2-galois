@@ -32,6 +32,8 @@
 #include "Lonestar/BoilerPlate.h"
 #include "Lonestar/BFS_SSSP.h"
 
+ #include "stack_vector.h"
+
 #include <fstream>
 #include <iostream>
 #include <unordered_set>
@@ -888,17 +890,12 @@ void serSP2Algo(Graph& graph, const GNode& source,
   using GNodeData =  typename Traits::NodeData;
   using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
 
-  using Dist = typename Traits::Dist;
   using SourceData = typename Traits::NodeData::SourceDataType;
   // The set of nodes which have been fixed but not explored
 
   size_t nodes_fixed = 0;
 
-  galois::gstl::Vector<SourceData*> r_set;
-  r_set.reserve(100);
-  std::vector<std::pair<SourceData*, Dist>> q_set;
-  q_set.reserve(100);
-
+  StackVector<SourceData*, 16> r_set;
   GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
 
   Heap heap(gc, source);
@@ -909,7 +906,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   Cmp cmp;
 
   // While the heap is not empty
-  while (LIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set.empty())) {
+  while (LIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set->empty())) {
 
     if (LIKELY(!heap.empty())) {
       T item = heap.top();
@@ -919,14 +916,14 @@ void serSP2Algo(Graph& graph, const GNode& source,
       if (sdata->fixed || sdata->dist < item.dist) {
         heap.pop();
         // If we got a min, go do some work.
-        if (!r_set.empty()) goto mainloop;
+        if (!r_set->empty()) goto mainloop;
         continue;
       }
 
       heap.pop();
       min = sdata;
       min->fixed = true;
-      r_set.push_back(min);
+      r_set->push_back(min);
     }
 
     if (LIKELY(!heap.empty()) && heap.top().dist == min->dist) {
@@ -935,9 +932,9 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
     mainloop:
     // Inner loop, go through the all the elements in R
-    while(r_set.size() > 0) {
-      SourceData* z = r_set.back();
-      r_set.pop_back();
+    while(r_set->size() > 0) {
+      SourceData* z = r_set->back();
+      r_set->pop_back();
 
       // Get all the vertices that have edges from z
       for (auto e : edgeRange(z->node_constants->node)) {
@@ -957,27 +954,20 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
         if (--k->pred <= 0 || cmp(k->dist, (min->dist + k->node_constants->min_in_weight))) {
           k->fixed = true;
-          r_set.push_back(k);
+          r_set->push_back(k);
         } else if (changed) {
-          q_set.push_back({k, k->dist});
+          pushWrap(heap, k->node_constants->node, k->dist);
         }
       }
 
-      if (r_set.empty() && !min->fixed && cmp(min->dist, heap.top().dist)) {
+      if (r_set->empty() && !min->fixed && cmp(min->dist, heap.top().dist)) {
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
         min->fixed = true;
-        r_set.push_back(min);
+        r_set->push_back(min);
       }
     }
-
-    for (auto& item : q_set) {
-      if (item.first->dist == item.second && !item.first->fixed) {
-        pushWrap(heap, item.first->node_constants->node, item.first->dist);
-      }
-    }
-    q_set.clear();
   }
 }
 
