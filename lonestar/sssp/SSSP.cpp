@@ -924,7 +924,6 @@ template <typename Graph,
 void serSP2Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange) {
 
-  using GNodeData =  typename Traits::NodeData;
   using SourceData = typename Traits::NodeData::SourceDataType;
   using HNode = HeapNode<SourceData>;
 
@@ -934,7 +933,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   // The set of nodes which have been fixed but not explored
   size_t nodes_fixed = 0;
 
-  StackVector<SourceData*, 16> r_set;
+  StackVector<SourceData*, 128> r_set;
   GarbageCollectFixedNodes<Graph, HNode> gc(graph);
 
   SourceData* sdata = &graph.getData(source).source_data_at(source);
@@ -1138,54 +1137,6 @@ void topoTileAlgo(Graph& graph, const GNode& source) {
   galois::runtime::reportStat_Single("SSSP-topo", "rounds", rounds);
 }
 
-template <typename Graph,
-	  typename T,
-	  typename P,
-          typename Traits = typename GraphTraits<Graph>::Traits>
-void all_pairs_shortest_path(Graph& graph_ref,
-                             uint32_t algo,
-                             std::string file,
-                             T& edgeRange,
-                             P& pushWrap) {
-
-  init_graph(graph_ref);
-  galois::gstl::Vector<GNode> ctx;
-  calc_graph_predecessors(graph_ref, edgeRange, graph_ref.size);
-
-  for(GNode vertex : graph_ref){
-    ctx.push_back(vertex);
-  }
-
-  auto parallel_loop = [&](GNode source, auto& ctx){
-    switch(algo){
-      case dijkstra : {
-        dijkstraAlgo(graph_ref, source, pushWrap, edgeRange, source);
-          break;
-        }
-      case serDelta : {
-        serDeltaAlgo(graph_ref, source, pushWrap, edgeRange, source);
-          break;
-        }
-      case serSP1 : {
-          serSP1Algo(graph_ref, source, pushWrap, edgeRange, source);
-          break;
-        }
-      case serSP2 : {
-          serSP2Algo(graph_ref, source, pushWrap, edgeRange, source);
-          break;
-        }
-      default : break;
-    }
-  };
-
-  galois::for_each(galois::iterate(ctx),
-                  parallel_loop,
-                  galois::wl<galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>>(),
-                  galois::no_conflicts(),
-                  galois::loopname("All Pairs Shortest Path"));
-
-}
-
 
 template<typename AlgoRunner>
 void run_benchmark(AlgoRunner& runner) {
@@ -1193,7 +1144,7 @@ void run_benchmark(AlgoRunner& runner) {
   runner.init();
 
   // Do a dry run without verification to warm things up.
-  //runner.run("init");
+  runner.run("init");
   // Reset everything before the main run.
   runner.reset();
 
