@@ -875,7 +875,7 @@ struct GarbageCollectFixedNodes {
   GarbageCollectFixedNodes(Graph& graph_) : graph(graph_) {}
   Graph& graph;
   inline bool operator()(HeapEntryType& item) const {
-    return graph.getData(item.src).source_data_at(index).fixed;
+    return item.sdata->fixed;
   }
 };
 
@@ -897,14 +897,21 @@ struct HeapNode {
     return left.node == right.node;
   }
 
+  HeapNode& operator=(const HeapNode& other) {
+    node = other.node;
+    uint32_t dist_as_int = other.dist;
+    dist = dist_as_int;
+    sdata = other.sdata;
+    return *this;
+  }
+
   HeapNode(GNode node, uint32_t dist_, SourceData* sdata)
       : node(node), sdata(sdata){
     dist = dist_;
   }
 
-  HeapNode(HeapNode& hnode) : node(hnode.node),
-                              sdata(hnode.sdata) {
-    dist = hnode.dist;
+  HeapNode(const HeapNode& hnode) {
+    *this = hnode;
   }
 };
 
@@ -933,7 +940,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   SourceData* sdata = &graph.getData(source).source_data_at(source);
   sdata->dist = 0;
 
-  Heap heap(gc, source);
+  Heap heap(gc);
   heap.push(HNode(source, 0, sdata));
 
   SourceData* min = nullptr;
@@ -953,7 +960,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
       }
 
       heap.pop();
-      min = sdata;
+      min = node.sdata;
       min->fixed = true;
       r_set->push_back(min);
     }
