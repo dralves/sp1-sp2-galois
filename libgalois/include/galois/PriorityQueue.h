@@ -298,16 +298,14 @@ protected:
   };
 
   const GC& gc;
-  const int index;
   Cont container;
   RevCmp revCmp;
 
 public:
   explicit GarbageCollectingMinHeap(const GC& garbage_collector,
-                                    const int source_index = 0,
                                     const Cmp& cmp = Cmp(),
                                     const Cont& container = Cont())
-      : gc(garbage_collector), index(source_index), container(container), revCmp(cmp) {}
+      : gc(garbage_collector), container(container), revCmp(cmp) {}
 
   bool empty() const { return container.empty(); }
 
@@ -320,7 +318,7 @@ public:
   inline void insert(const value_type& x) { this->push(x); }
 
   void push(const value_type& x) {
-    while(!container.empty() && gc(index, container.back())) {
+    while(!container.empty() && gc(container.back())) {
       container.pop_back();
     }
 
@@ -330,7 +328,7 @@ public:
 
   void pop() {
 
-    while(!container.empty() && gc(index, container.back())) {
+    while(!container.empty() && gc(container.back())) {
       container.pop_back();
     }
 
