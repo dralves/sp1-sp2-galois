@@ -374,15 +374,6 @@ struct NodeData<ProfilingSourceData, true> {
   }
 };
 
-template<typename Graph, typename HeapEntryType, typename NodeDataType>
-struct GarbageCollectFixedNodes {
-  GarbageCollectFixedNodes(Graph& graph_) : graph(graph_) {}
-  Graph& graph;
-  inline bool operator()(int index, HeapEntryType& item) const {
-    return graph.getData(item.src).source_data_at(index).fixed;
-  }
-};
-
 typedef typename galois::graphs::LC_CSR_Graph<NodeData<SerSourceData, true>,
                                               uint32_t>
 ::with_no_lockable<true>::type
@@ -878,6 +869,45 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
   EdgeRange er;
 };
 
+
+template<typename Graph, typename HeapEntryType>
+struct GarbageCollectFixedNodes {
+  GarbageCollectFixedNodes(Graph& graph_) : graph(graph_) {}
+  Graph& graph;
+  inline bool operator()(HeapEntryType& item) const {
+    return graph.getData(item.src).source_data_at(index).fixed;
+  }
+};
+
+template<typename SourceData>
+struct HeapNode {
+  typedef typename SourceData::Dist Dist;
+  GNode node;
+  Dist dist;
+  SourceData* sdata;
+
+  friend bool operator<(const HeapNode& left,
+                        const HeapNode& right) {
+    return left.dist == right.dist ? left.node < right.node
+                                                : left.dist < right.dist;
+  }
+
+  friend bool operator==(const HeapNode& left,
+                         const HeapNode& right) {
+    return left.node == right.node;
+  }
+
+  HeapNode(GNode node, uint32_t dist_, SourceData* sdata)
+      : node(node), sdata(sdata){
+    dist = dist_;
+  }
+
+  HeapNode(HeapNode& hnode) : node(hnode.node),
+                              sdata(hnode.sdata) {
+    dist = hnode.dist;
+  }
+};
+
 template <typename Graph,
           typename T,
           typename P,
@@ -888,19 +918,23 @@ void serSP2Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange) {
 
   using GNodeData =  typename Traits::NodeData;
-  using Heap = galois::GarbageCollectingMinHeap<T, GarbageCollectFixedNodes<Graph, T, GNodeData>>;
-
   using SourceData = typename Traits::NodeData::SourceDataType;
-  // The set of nodes which have been fixed but not explored
+  using HNode = HeapNode<SourceData>;
 
+  using Heap = galois::GarbageCollectingMinHeap<HNode,
+                                                GarbageCollectFixedNodes<Graph, HNode>>;
+
+  // The set of nodes which have been fixed but not explored
   size_t nodes_fixed = 0;
 
   StackVector<SourceData*, 16> r_set;
-  GarbageCollectFixedNodes<Graph, T, GNodeData> gc(graph);
+  GarbageCollectFixedNodes<Graph, HNode> gc(graph);
+
+  SourceData* sdata = &graph.getData(source).source_data_at(source);
+  sdata->dist = 0;
 
   Heap heap(gc, source);
-  pushWrap(heap, source, 0);
-  graph.getData(source).source_data_at(source).dist = 0;
+  heap.push(HNode(source, 0, sdata));
 
   SourceData* min = nullptr;
   Cmp cmp;
@@ -909,11 +943,9 @@ void serSP2Algo(Graph& graph, const GNode& source,
   while (LIKELY(nodes_fixed < graph.size()) && (!heap.empty() || !r_set->empty())) {
 
     if (LIKELY(!heap.empty())) {
-      T item = heap.top();
-      GNodeData& ndata =  graph.getData(item.src);
-      SourceData* sdata = &ndata.source_data_at(source);
+      HNode node = heap.top();
 
-      if (sdata->fixed || sdata->dist < item.dist) {
+      if (node.sdata->fixed || node.sdata->dist < node.dist) {
         heap.pop();
         // If we got a min, go do some work.
         if (!r_set->empty()) goto mainloop;
@@ -956,7 +988,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
           k->fixed = true;
           r_set->push_back(k);
         } else if (changed) {
-          pushWrap(heap, k->node_constants->node, k->dist);
+          heap.push(HNode(k->node_constants->node, k->dist, k));
         }
       }
 
