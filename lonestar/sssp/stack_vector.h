@@ -69,10 +69,10 @@ class my_bitvector_base {
          }
          return *this;
       }
-      const bitref &operator =(const bitref &br) {
+      inline const bitref &operator =(const bitref &br) {
          return this->operator =(bool(br));
       }
-      operator bool() const {
+      inline operator bool() const {
          return ((an_int_ & mask_) != 0) ? true : false;
       }
 
@@ -89,12 +89,12 @@ class my_bitvector : public my_bitvector_base {
  public:
    my_bitvector() { ::std::fill(ints_, ints_ + numints, 0); }
 
-   bool operator [](::std::size_t bitnum) const {
+   inline bool operator [](::std::size_t bitnum) const {
       const ::std::size_t bytenum = bitnum / 64;
       bitnum = bitnum % 64;
       return ((ints_[bytenum] & (::std::uint64_t(1) << bitnum)) != 0) ? true : false;
    }
-   bitref operator[](::std::size_t bitnum) {
+   inline bitref operator[](::std::size_t bitnum) {
      const ::std::size_t bytenum = bitnum / 64;
       bitnum = bitnum % 64;
       ::std::uint64_t mask = ::std::uint64_t(1) << bitnum;
