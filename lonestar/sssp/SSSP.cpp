@@ -50,7 +50,7 @@
 #define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
 
 #ifndef NUM_NODES
- #define NUM_NODES 16777089
+ #define NUM_NODES 16384
 #endif
 
 
@@ -926,7 +926,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   // The set of nodes which have been fixed but not explored
   size_t nodes_fixed = 0;
 
-  StackVector<SourceData*, 128> r_set;
+  StackVector<HNode, 128> r_set;
 
   my_bitvector<NUM_NODES> fixed;
   GarbageCollectFixedNodes<Graph, HNode> gc(graph, fixed);
@@ -937,8 +937,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   Heap heap(gc);
   heap.push(HNode(source, 0, sdata));
 
-  SourceData* min = nullptr;
-  GNode minnode = source;
+  HNode min(0, 0, nullptr);
   Cmp cmp;
 
   // While the heap is not empty
@@ -955,57 +954,58 @@ void serSP2Algo(Graph& graph, const GNode& source,
       }
 
       heap.pop();
-      min = node.sdata;
-      minnode = node.node;
-      fixed[minnode] = true;
+      min = node;
+      fixed[min.node] = true;
       r_set->push_back(min);
     }
 
-    if (LIKELY(!heap.empty()) && heap.top().dist == min->dist) {
+    if (LIKELY(!heap.empty()) && heap.top().dist == min.dist) {
       continue;
     }
 
     mainloop:
     // Inner loop, go through the all the elements in R
     while(r_set->size() > 0) {
-      SourceData* z = r_set->back();
+      HNode z = r_set->back();
       r_set->pop_back();
 
       // Get all the vertices that have edges from z
-      for (auto e : edgeRange(z->node_constants->node)) {
-        auto& kndata = graph.getData(graph.getEdgeDst(e));
-        GNode knode = kndata.node_constants.node;
+      for (auto e : edgeRange(z.node)) {
+        GNode knode = graph.getEdgeDst(e);
 
         if (fixed[knode]) continue;
 
+        auto& kndata = graph.getData(knode);
         SourceData& k = kndata.source_data_at(source);
+        HNode khnode(knode, k.dist, &k);
 
         // If k vertex is not fixed, process the edge between z and k.
         auto z_k_dist = graph.getEdgeData(e);
 
         bool changed = false;
-        if (cmp(z->dist + z_k_dist, k.dist)) {
-          k.dist = z->dist + z_k_dist;
+        if (cmp(z.dist + z_k_dist, k.dist)) {
+          k.dist = z.dist + z_k_dist;
+          uint32_t dist_as_int = k.dist;
+          khnode.dist = dist_as_int;
           changed = true;
-          if (k.dist < min->dist) {
-            min = &k;
-            minnode = knode;
+          if (k.dist < min.dist) {
+            min = khnode;
           }
         }
 
-        if (--k.pred <= 0 || cmp(k.dist, (min->dist + kndata.node_constants.min_in_weight))) {
+        if (--k.pred <= 0 || cmp(k.dist, (min.dist + kndata.node_constants.min_in_weight))) {
           fixed[knode] = true;
-          r_set->push_back(&k);
+          r_set->push_back(khnode);
         } else if (changed) {
           heap.push(HNode(knode, k.dist, &k));
         }
       }
 
-      if (r_set->empty() && !fixed[minnode] && cmp(min->dist, heap.top().dist)) {
+      if (r_set->empty() && !fixed[min.node] && cmp(min.dist, heap.top().dist)) {
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
-        fixed[minnode] = true;
+        fixed[min.node] = true;
         r_set->push_back(min);
       }
     }
