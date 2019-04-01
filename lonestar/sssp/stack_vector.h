@@ -51,6 +51,61 @@ BASE_DECL_ALIGNED_MEMORY(1024);
 BASE_DECL_ALIGNED_MEMORY(2048);
 BASE_DECL_ALIGNED_MEMORY(4096);
 
+
+class my_bitvector_base {
+ protected:
+   class bitref { // Prevent this class from being used anywhere else.
+    public:
+      bitref(::std::uint64_t &an_int, ::std::uint64_t mask)
+           : an_int_(an_int), mask_(mask)
+      {
+      }
+
+      const bitref &operator =(bool val) {
+         if (val) {
+            an_int_ |= mask_;
+         } else {
+            an_int_ &= ~mask_;
+         }
+         return *this;
+      }
+      const bitref &operator =(const bitref &br) {
+         return this->operator =(bool(br));
+      }
+      operator bool() const {
+         return ((an_int_ & mask_) != 0) ? true : false;
+      }
+
+    private:
+      ::std::uint64_t &an_int_;
+      ::std::uint64_t mask_;
+   };
+};
+
+template < ::std::size_t Size >
+class my_bitvector : public my_bitvector_base {
+ private:
+   static constexpr ::std::size_t numints = ((Size + 63) / 64);
+ public:
+   my_bitvector() { ::std::fill(ints_, ints_ + numints, 0); }
+
+   bool operator [](::std::size_t bitnum) const {
+      const ::std::size_t bytenum = bitnum / 64;
+      bitnum = bitnum % 64;
+      return ((ints_[bytenum] & (::std::uint64_t(1) << bitnum)) != 0) ? true : false;
+   }
+   bitref operator[](::std::size_t bitnum) {
+     const ::std::size_t bytenum = bitnum / 64;
+      bitnum = bitnum % 64;
+      ::std::uint64_t mask = ::std::uint64_t(1) << bitnum;
+      return bitref(ints_[bytenum], mask);
+   }
+
+ private:
+   ::std::uint64_t ints_[numints];
+};
+
+
 //#include "base/memory/aligned_memory.h"
 // This allocator can be used with STL containers to provide a stack buffer
 // from which to allocate memory and overflows onto the heap. This stack buffer
@@ -243,7 +298,7 @@ class StackVector : public StackContainer<
   // operator-> (using "->at()" does exception stuff we don't want).
   T& operator[](size_t i) { return this->container().operator[](i); }
   const T& operator[](size_t i) const {
-    return this->container().operator[](i);
+    this->container().operator[](i);
   }
 };
 #endif  // BASE_STACK_CONTAINER_H_
