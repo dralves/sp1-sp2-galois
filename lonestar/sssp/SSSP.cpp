@@ -49,6 +49,10 @@
 #define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
 #define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
 
+#ifndef NUM_NODES
+ #define NUM_NODES 16777089
+#endif
+
 
 namespace cll = llvm::cl;
 
@@ -558,7 +562,7 @@ class AlgoRunner {
     explored_nodes = 0;
     fixed_nodes = 0;
     if (!apsp) {
-      do_run();
+      do_run(source);
     } else {
       do_run_apsp();
     }
@@ -569,7 +573,7 @@ class AlgoRunner {
 
  protected:
   virtual bool do_verify() = 0;
-  virtual void do_run(GNode source = -1) = 0;
+  virtual void do_run(GNode source) = 0;
   virtual void do_run_apsp() = 0;
 
   GNode source;
@@ -602,6 +606,7 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
   }
 
   virtual void do_run_apsp() {
+
     auto parallel_loop = [this](GNode source, auto& ctx) {
                            this->do_run(source);
                          };
@@ -730,7 +735,6 @@ class DeltaStepAlgoRunner : public GraphAlgoBase<Graph, T> {
   }
 
   virtual void do_run(GNode source) {
-    if (source == -1) source = this->source;
     deltaStepAlgo<Graph, T>(graph, source, pw, er);
   }
 
@@ -849,7 +853,6 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
   }
 
   virtual void do_run(GNode source) {
-    if (source == -1) source = this->source;
     dijkstraAlgo<Graph, T>(graph, source, pw, er);
   }
 
@@ -861,9 +864,9 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
 
 template<typename Graph, typename HeapEntryType>
 struct GarbageCollectFixedNodes {
-  GarbageCollectFixedNodes(Graph& graph_, my_bitvector<16384>& fixed) : graph(graph_), fixed(fixed) {}
+  GarbageCollectFixedNodes(Graph& graph_, my_bitvector<NUM_NODES>& fixed) : graph(graph_), fixed(fixed) {}
   Graph& graph;
-  my_bitvector<16384>& fixed;
+  my_bitvector<NUM_NODES>& fixed;
   inline bool operator()(HeapEntryType& item) const {
     return fixed[item.node];
   }
@@ -924,7 +927,8 @@ void serSP2Algo(Graph& graph, const GNode& source,
   size_t nodes_fixed = 0;
 
   StackVector<SourceData*, 128> r_set;
-  my_bitvector<16384> fixed;
+
+  my_bitvector<NUM_NODES> fixed;
   GarbageCollectFixedNodes<Graph, HNode> gc(graph, fixed);
 
   SourceData* sdata = &graph.getData(source).source_data_at(source);
@@ -934,7 +938,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
   heap.push(HNode(source, 0, sdata));
 
   SourceData* min = nullptr;
-  GNode minnode;
+  GNode minnode = source;
   Cmp cmp;
 
   // While the heap is not empty
@@ -971,28 +975,29 @@ void serSP2Algo(Graph& graph, const GNode& source,
       for (auto e : edgeRange(z->node_constants->node)) {
         auto& kndata = graph.getData(graph.getEdgeDst(e));
         GNode knode = kndata.node_constants.node;
-        SourceData* k = &kndata.source_data_at(source);
 
         if (fixed[knode]) continue;
+
+        SourceData& k = kndata.source_data_at(source);
 
         // If k vertex is not fixed, process the edge between z and k.
         auto z_k_dist = graph.getEdgeData(e);
 
         bool changed = false;
-        if (cmp(z->dist + z_k_dist, k->dist)) {
-          k->dist = z->dist + z_k_dist;
+        if (cmp(z->dist + z_k_dist, k.dist)) {
+          k.dist = z->dist + z_k_dist;
           changed = true;
-          if (k->dist < min->dist) {
-            min = k;
+          if (k.dist < min->dist) {
+            min = &k;
             minnode = knode;
           }
         }
 
-        if (--k->pred <= 0 || cmp(k->dist, (min->dist + k->node_constants->min_in_weight))) {
+        if (--k.pred <= 0 || cmp(k.dist, (min->dist + kndata.node_constants.min_in_weight))) {
           fixed[knode] = true;
-          r_set->push_back(k);
+          r_set->push_back(&k);
         } else if (changed) {
-          heap.push(HNode(knode, k->dist, k));
+          heap.push(HNode(knode, k.dist, &k));
         }
       }
 
@@ -1023,7 +1028,6 @@ class SerSP2AlgoRunner : public GraphAlgoBase<Graph, T> {
   }
 
   virtual void do_run(GNode source) {
-    if (source == -1) source = this->source;
     serSP2Algo<Graph, T>(graph, source, pw, er);
   }
 
