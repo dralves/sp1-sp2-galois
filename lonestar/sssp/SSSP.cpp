@@ -817,24 +817,17 @@ void dijkstraAlgo(Graph& graph,
       continue;
     }
 
-    // std::cout << "Pop: " << item.src << " dist: " << item.dist << std::endl;
     for (auto e : edgeRange(item)) {
 
       GNode dst   = graph.getEdgeDst(e);
       auto& ddata = graph.getData(dst).source_data_at(source);
       auto& edata =  graph.getEdgeData(e);
-      // std::cout << "Edge: " << item.src << " - " << edata << " -> " << dst << std::endl;
 
       const auto newDist = item.dist + edata;
-      //      std::cout << "Node: " << dst << " Current dist: " << item.dist << " Edge: " << *e << " Edge dist: " << graph.getEdgeData(e) << std::endl;
 
       if (newDist < ddata.dist) {
-        //        std::cout << "Setting " << dst << " to " << newDist << std::endl;
         ddata.dist = newDist;
-        // std::cout << "R&P: " << dst << " new dist: " << newDist << std::endl;
         pushWrap(wl, dst, newDist);
-      } else {
-        // std::cout << "Skip: " << dst << " new: " << newDist << "old: " << item.dist << std::endl;
       }
     }
   }
@@ -858,10 +851,6 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
   virtual void do_run(GNode source) {
     if (source == -1) source = this->source;
     dijkstraAlgo<Graph, T>(graph, source, pw, er);
-    // for (int i = 0; i < 32; i++) {
-    //   auto& ndata = graph.getData(i);
-    //   std::cout << "Source[" << source << "]: Node[" << ndata.node_constants.node << "]: " << ndata.source_data_at(source).dist << std::endl;
-    // }
   }
 
   Graph& graph;
