@@ -125,6 +125,7 @@ then
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale20.gr -algo ${algos} -t ${threads}                                                 # 92M  
   fi                                                                                                                                
 
+
   if [ ${testcase} = 'moderate' ]
   then                                                                                                                             
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Italy_rand.gr -algo ${algos} -t ${threads}                                                             #105M 
@@ -177,6 +178,31 @@ then
     #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-scale24-ef16_adj.gr -algo ${algos} -t ${threads}                                           #4.0G 
     #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-scale25-ef16_adj_rand.gr -algo ${algos} -t ${threads}                                  #8.0G 
     #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-scale25-ef16_adj.gr -algo ${algos} -t ${threads}                                           #8.0G 
+  fi
+
+  if [ ${testcase} = 'kron-small' ]
+  then
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e14.gr -algo ${algos} -t ${threads}                                                                       #372K   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e15.gr -algo ${algos} -t ${threads}                                                                       #792K   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e16.gr -algo ${algos} -t ${threads}                                                                       #1.7M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e17.gr -algo ${algos} -t ${threads}                                                                       #3.6M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e18.gr -algo ${algos} -t ${threads}                                                                       #7.6M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e19.gr -algo ${algos} -t ${threads}                                                                       #17M    
+  fi
+
+  if [ ${testcase} = 'kron-moderate' ]
+  then
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e20.gr -algo ${algos} -t ${threads}                                                                       #35M    
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e21.gr -algo ${algos} -t ${threads}                                                                       #76M    
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e22.gr -algo ${algos} -t ${threads}                                                                       #163M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e23.gr -algo ${algos} -t ${threads}                                                                       #351M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e24.gr -algo ${algos} -t ${threads}                                                                       #759M   
+  fi
+
+  if [ ${testcase} = 'kron-large' ]
+  then
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e25.gr -algo ${algos} -t ${threads}                                                                       #1.7G   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e26.gr -algo ${algos} -t ${threads}                                                                       #3.5G   
   fi
 fi
 
@@ -239,6 +265,25 @@ then
     #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Asia.gr -algo ${algos} -t ${threads} -apsp                                                        #189M 
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale21_rand.gr -algo ${algos} -t ${threads} -apsp                                          #191M 
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale21.gr -algo ${algos} -t ${threads} -apsp                                           #191M 
+  fi
+
+  if [ ${testcase} = 'kron-small' ]
+  then
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e14.gr -algo ${algos} -t ${threads} -apsp                                                                 #372K   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e15.gr -algo ${algos} -t ${threads} -apsp                                                                 #792K   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e16.gr -algo ${algos} -t ${threads} -apsp                                                                 #1.7M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e17.gr -algo ${algos} -t ${threads} -apsp                                                                 #3.6M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e18.gr -algo ${algos} -t ${threads} -apsp                                                                 #7.6M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e19.gr -algo ${algos} -t ${threads} -apsp                                                                 #17M    
+  fi
+
+  if [ ${testcase} = 'kron-moderate' ]
+  then
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e20.gr -algo ${algos} -t ${threads} -apsp                                                                 #35M    
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e21.gr -algo ${algos} -t ${threads} -apsp                                                                 #76M    
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e22.gr -algo ${algos} -t ${threads} -apsp                                                                 #163M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e23.gr -algo ${algos} -t ${threads} -apsp                                                                 #351M   
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/kron-2e24.gr -algo ${algos} -t ${threads} -apsp                                                                 #759M   
   fi
 fi
 #----------------------------------------------------
