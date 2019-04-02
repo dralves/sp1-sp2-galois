@@ -39,6 +39,7 @@
 #include <iostream>
 #include <unordered_set>
 #include <cstdlib>
+#include <iomanip>
 
 #ifndef NDEBUG
 #define D(x) x
@@ -556,6 +557,8 @@ class AlgoRunner {
 
   void run(std::string run_name) {
     std::cout << "Running " << name() << " algorithm for run: " << run_name << std::endl;
+    std::string resultfile_name = "data.txt";
+    std::string graph_name = removeExtension(basename(filename));
     galois::StatTimer tmain;
     tmain.start();
     profiling_start = clock_type::now();
@@ -568,6 +571,15 @@ class AlgoRunner {
     }
     tmain.stop();
     galois::runtime::reportStat_Single("AlgoRunner[" + run_name + "]", "Total time", tmain.get());
+    std::ofstream data_stream;
+    data_stream.open(resultfile_name, std::ofstream::out | std::ofstream::app);
+    if(run_name == "init"){
+      data_stream << std::endl << "Algo: " << ALGO_NAMES[algo] << "\tMode :" << (apsp ? "APSP" : "SSSP") << std::endl;
+      data_stream << std::left << std::setw((graph_name.length() > 10)? graph_name.length() : 10) << "graph name";
+      data_stream << std::right << std::setw(15) << "run" << std::setw(10) <<  "Time" << std::endl;
+    }
+    data_stream << std::setw((graph_name.length() > 10)? graph_name.length() : 10) <<  graph_name  << std::setw(15) << run_name << std::setw(10) <<  tmain.get() << std::endl;
+    data_stream.close();
   }
 
 
@@ -622,8 +634,9 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
       return GraphTraits<Graph>::SSSP::verify(graph, this->source);
     } else {
       GraphTraits<Graph>::SSSP::verify(graph, this->source);
-      int random_node  = rand() % graph.size();
-      std::cout << "Randomly veryfying node: " << random_node << std::endl;
+      std::srand(std::time(0));
+      int random_node  = std::rand() % graph.size();
+      std::cout << "Randomly verifying node: " << random_node << std::endl;
       return GraphTraits<Graph>::SSSP::verify(graph, random_node);
     }
   }
@@ -751,13 +764,14 @@ template <typename Graph,
 void serDeltaAlgo(Graph& graph,
                   const GNode& source,
                   const P& pushWrap,
-                  const R& edgeRange,
-                  uint32_t index = 0) {
+                  const R& edgeRange) {
 
   using UpdateRequestIndexer = typename Traits::UpdateRequestIndexer;
 
+  //using SourceData = typename Traits::NodeData::SourceDataType;
+
   SerialBucketWL<T, UpdateRequestIndexer> wl(UpdateRequestIndexer{stepShift});
-  graph.getData(source)->source_data_at(index).dist = 0;
+  graph.getData(source).source_data_at(source).dist = 0;
 
   pushWrap(wl, source, 0);
 
@@ -769,14 +783,14 @@ void serDeltaAlgo(Graph& graph,
       auto item = curr.front();
       curr.pop_front();
 
-      auto& item_data = graph.getData(item.src).source_data_at(index);
+      auto& item_data = graph.getData(item.src).source_data_at(source);
       if (item_data.dist < item.dist) {
        continue;
       }
 
       for (auto e : edgeRange(item)) {
         GNode dst   = graph.getEdgeDst(e);
-        auto& ddata = graph.getData(dst).source_data_at(index);
+        auto& ddata = graph.getData(dst).source_data_at(source);
 
         const auto newDist = item.dist + graph.getEdgeData(e);
 
@@ -1036,6 +1050,29 @@ class SerSP2AlgoRunner : public GraphAlgoBase<Graph, T> {
   EdgeRange er;
 };
 
+template<typename Graph,
+         typename T = typename GraphTraits<Graph>::SSSP::UpdateRequest>
+class SerDeltaAlgoRunner : public GraphAlgoBase<Graph, T> {
+ public:
+  using PushWrap = typename GraphTraits<Graph>::ReqPushWrap;
+  using EdgeRange = typename GraphTraits<Graph>::OutEdgeRangeFn;
+
+  SerDeltaAlgoRunner() : graph(GraphAlgoBase<Graph, T>::graph), er({graph}) {}
+
+  virtual std::string name() {
+    std::string ret = "SerDelta";
+    return ret + (apsp ? "[APSP]" : "[SSSP]") + (prof ? "-prof" : "");
+  }
+
+  virtual void do_run(GNode source) {
+    serDeltaAlgo<Graph, T>(graph, source, pw, er);
+  }
+
+  Graph& graph;
+  PushWrap pw;
+  EdgeRange er;
+};
+
 template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
@@ -1208,6 +1245,21 @@ int main(int argc, char** argv) {
         run_benchmark(runner);
       } else if (apsp && !prof) {
         SerSP2AlgoRunner<SerialASGraph> runner;
+        run_benchmark(runner);
+      } else {
+        std::abort();
+      }
+      break;
+    }
+    case serDelta: {
+      if (!apsp && !prof) {
+        SerDeltaAlgoRunner<SerialSSGraph> runner;
+        run_benchmark(runner);
+      } else if (!apsp && prof) {
+        SerDeltaAlgoRunner<ProfilingGraph> runner;
+        run_benchmark(runner);
+      } else if (apsp && !prof) {
+        SerDeltaAlgoRunner<SerialASGraph> runner;
         run_benchmark(runner);
       } else {
         std::abort();
