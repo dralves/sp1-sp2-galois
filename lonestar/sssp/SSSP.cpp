@@ -46,12 +46,12 @@
 #define D(x)
 #endif
 
+#ifndef STACK_BITVECTOR_SIZE
+ #define STACK_BITVECTOR_SIZE 16384
+#endif
+
 #define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
 #define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
-
-#ifndef NUM_NODES
- #define NUM_NODES 16384
-#endif
 
 
 namespace cll = llvm::cl;
@@ -606,7 +606,6 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
   }
 
   virtual void do_run_apsp() {
-
     auto parallel_loop = [this](GNode source, auto& ctx) {
                            this->do_run(source);
                          };
@@ -864,9 +863,9 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
 
 template<typename Graph, typename HeapEntryType>
 struct GarbageCollectFixedNodes {
-  GarbageCollectFixedNodes(Graph& graph_, my_bitvector<NUM_NODES>& fixed) : graph(graph_), fixed(fixed) {}
+  GarbageCollectFixedNodes(Graph& graph_, my_bitvector<STACK_BITVECTOR_SIZE>& fixed) : graph(graph_), fixed(fixed) {}
   Graph& graph;
-  my_bitvector<NUM_NODES>& fixed;
+  my_bitvector<STACK_BITVECTOR_SIZE>& fixed;
   inline bool operator()(HeapEntryType& item) const {
     return fixed[item.node];
   }
@@ -928,7 +927,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
   StackVector<HNode, 128> r_set;
 
-  my_bitvector<NUM_NODES> fixed;
+  my_bitvector<STACK_BITVECTOR_SIZE> fixed;
   GarbageCollectFixedNodes<Graph, HNode> gc(graph, fixed);
 
   SourceData* sdata = &graph.getData(source).source_data_at(source);

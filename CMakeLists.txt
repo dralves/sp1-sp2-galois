@@ -21,6 +21,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+add_definitions(-DSTACK_BITVECTOR_SIZE $ENV{STACK_BITVECTOR_SIZE})
+
 ###### Options (alternatively pass as options to cmake -DName=Value) ######
 ###### Distributed-heterogeneous features ######
 set(ENABLE_DIST_GALOIS OFF CACHE BOOL "Enable distributed features")
