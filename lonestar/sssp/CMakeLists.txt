@@ -1,5 +1,3 @@
-
-
 app(sssp SSSP.cpp bf/bloom_filter/basic.cpp bf/hash.cpp bf/bitvector.cpp)
 
 add_test_scale(small sssp "${BASEINPUT}/structured/rome99.gr")
