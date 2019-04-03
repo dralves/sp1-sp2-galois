@@ -6,6 +6,7 @@ set(GALOIS_VERSION_MINOR "0")
 set(GALOIS_VERSION_PATCH "0")
 set(GALOIS_VERSION ${GALOIS_VERSION_MAJOR}.${GALOIS_VERSION_MINOR}.${GALOIS_VERSION_PATCH})
 set(GALOIS_COPYRIGHT_YEAR "2018") # Also in COPYRIGHT
+set(stack_vector_size ${STACK_BITVECTOR_SIZE})
 
 #adding additional compiler flags for mpip profiling
 #set(LIBUNWIND_DIR "/net/ohm/export/cdgc/gill/modules/usr/local/lib")
@@ -88,7 +89,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
   if(ICC_VERSION VERSION_LESS 16.0)
     message(FATAL_ERROR "ICC must be 16.0 or higher; found: ${ICC_VERSION} instead")
   endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd68 -wd981 -wd383 -wd869 -wd2196 -wd279 -wd2504 -wd2943 -wd32013 -wd3373")
+
+  if(stack_vector_size)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd68 -wd981 -wd383 -wd869 -wd2196 -wd279 -wd2504 -wd2943 -wd32013 -wd3373 -DSTACK_BITVECTOR_SIZE=${STACK_BITVECTOR_SIZE}")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd68 -wd981 -wd383 -wd869 -wd2196 -wd279 -wd2504 -wd2943 -wd32013 -wd3373")
+  endif()
+
 
   if(CXX_TOOLCHAIN)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gxx-name=${CXX_TOOLCHAIN}/g++")
