@@ -47,13 +47,12 @@
 #define D(x)
 #endif
 
-#define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
-#define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
-
-#ifndef NUM_NODES
- #define NUM_NODES 16384
+#ifndef STACK_BITVECTOR_SIZE
+#define STACK_BITVECTOR_SIZE 16384
 #endif
 
+#define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
+#define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
 
 namespace cll = llvm::cl;
 
@@ -557,7 +556,7 @@ class AlgoRunner {
 
   void run(std::string run_name) {
     std::cout << "Running " << name() << " algorithm for run: " << run_name << std::endl;
-    std::string resultfile_name = "data.txt";
+    std::string resultfile_name = "results.csv";
     std::string graph_name = removeExtension(basename(filename));
     galois::StatTimer tmain;
     tmain.start();
@@ -571,14 +570,20 @@ class AlgoRunner {
     }
     tmain.stop();
     galois::runtime::reportStat_Single("AlgoRunner[" + run_name + "]", "Total time", tmain.get());
+    bool print_header = false;
+    if(run_name == "init"){
+      std::ifstream data_stream(resultfile_name);
+      if(data_stream.peek() == std::ifstream::traits_type::eof())
+	print_header = true;
+      data_stream.close();
+    }
     std::ofstream data_stream;
     data_stream.open(resultfile_name, std::ofstream::out | std::ofstream::app);
-    if(run_name == "init"){
-      data_stream << std::endl << "Algo: " << ALGO_NAMES[algo] << "\tMode :" << (apsp ? "APSP" : "SSSP") << std::endl;
-      data_stream << std::left << std::setw((graph_name.length() > 10)? graph_name.length() : 10) << "graph name";
-      data_stream << std::right << std::setw(15) << "run" << std::setw(10) <<  "Time" << std::endl;
-    }
-    data_stream << std::setw((graph_name.length() > 10)? graph_name.length() : 10) <<  graph_name  << std::setw(15) << run_name << std::setw(10) <<  tmain.get() << std::endl;
+    if(print_header)
+      data_stream << "Algo;Mode;Graph_name;Init_Time;Main_Time;Profile_Time";
+    if(run_name =="init")
+      data_stream << std::endl << ALGO_NAMES[algo] << ';' << (apsp ? "APSP" : "SSSP") << ';' << graph_name ;  
+    data_stream << ';' <<  tmain.get() ;
     data_stream.close();
   }
 
@@ -878,9 +883,9 @@ class DijkstraAlgoRunner : public GraphAlgoBase<Graph, T> {
 
 template<typename Graph, typename HeapEntryType>
 struct GarbageCollectFixedNodes {
-  GarbageCollectFixedNodes(Graph& graph_, my_bitvector<NUM_NODES>& fixed) : graph(graph_), fixed(fixed) {}
+  GarbageCollectFixedNodes(Graph& graph_, my_bitvector<STACK_BITVECTOR_SIZE>& fixed) : graph(graph_), fixed(fixed) {}
   Graph& graph;
-  my_bitvector<NUM_NODES>& fixed;
+  my_bitvector<STACK_BITVECTOR_SIZE>& fixed;
   inline bool operator()(HeapEntryType& item) const {
     return fixed[item.node];
   }
@@ -942,7 +947,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
   StackVector<HNode, 128> r_set;
 
-  my_bitvector<NUM_NODES> fixed;
+  my_bitvector<STACK_BITVECTOR_SIZE> fixed;
   GarbageCollectFixedNodes<Graph, HNode> gc(graph, fixed);
 
   SourceData* sdata = &graph.getData(source).source_data_at(source);
