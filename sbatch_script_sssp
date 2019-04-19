@@ -86,7 +86,7 @@ esac
 done
 
 recompile(){
-    if [ ${algos} = 'serSP2' ]
+    if [ ${algos} = 'serSP2' ] || [ ${algos} = 'serSP1' ]
     then 
       cd ${path}/../../
       CXX=icc cmake ../ -DSTACK_BITVECTOR_SIZE=$1 &> /dev/null
@@ -146,7 +146,7 @@ then
     recompile 138614 ${threads}
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/Knowledge_Repo.gr -algo ${algos} -t ${threads}                                                        # 12M  
     recompile 65537 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron_g500-logn16.gr -algo ${algos} -t ${threads}                                                           # 20M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn16.gr -algo ${algos} -t ${threads}                                                  # 20M
     recompile 65537 ${threads}
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn16.gr -algo ${algos} -t ${threads}                                           # 20M
     recompile 1441296 ${threads}
@@ -195,7 +195,7 @@ then
     #recompile 434103 ${threads}
     #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coPapersCiteseer.gr -algo ${algos} -t ${threads}                                            #126M 
     recompile 524288 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron_g500-logn19.gr -algo ${algos} -t ${threads}                                                           #171M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn19.gr -algo ${algos} -t ${threads}                                                  #171M
     recompile 524288 ${threads}
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn19.gr -algo ${algos} -t ${threads}                                           #171M
     #recompile 11950758 ${threads}
@@ -380,7 +380,7 @@ then
     recompile 138614 ${threads}
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/Knowledge_Repo.gr -algo ${algos} -t ${threads} -apsp                                                   # 12M
     recompile 65537 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron_g500-logn16.gr -algo ${algos} -t ${threads} -apsp                                                      # 20M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn16.gr -algo ${algos} -t ${threads} -apsp                                             # 20M
     recompile 65537 ${threads}
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn16.gr -algo ${algos} -t ${threads} -apsp                                      # 20M
     recompile 1441296 ${threads}
@@ -428,7 +428,7 @@ then
     #recompile 434103 ${threads}                                                                   
     #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coPapersCiteseer.gr -algo ${algos} -t ${threads} -apsp                                       #126M
     recompile 524288 ${threads}                                                                    
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron_g500-logn19.gr -algo ${algos} -t ${threads} -apsp                                                      #171M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn19.gr -algo ${algos} -t ${threads} -apsp                                             #171M
     recompile 524288 ${threads}                                                                    
     ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn19.gr -algo ${algos} -t ${threads} -apsp                                      #171M
     #recompile 11950758 ${threads}                                                                 
