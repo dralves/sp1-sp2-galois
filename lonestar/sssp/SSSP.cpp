@@ -931,6 +931,76 @@ template <typename Graph,
           typename T,
           typename P,
           typename R,
+          typename Traits = GraphTraits<Graph>>
+void serSP1Algo(Graph& graph, const GNode& source,
+                const P& pushWrap, const R& edgeRange) {
+
+  using SourceData = typename Traits::NodeData::SourceDataType;
+  using HNode = HeapNode<SourceData>;
+  using Heap = galois::GarbageCollectingMinHeap<HNode, GarbageCollectFixedNodes<Graph, HNode>>;
+
+  // The set of nodes which have been fixed but not explored
+  StackVector<HNode, 128> r_set;
+
+  // Array fixed indicates whether a node is fixed
+  my_bitvector<STACK_BITVECTOR_SIZE> fixed;
+
+  GarbageCollectFixedNodes<Graph, HNode> gc(graph, fixed);
+  Heap heap(gc);
+
+  SourceData* sdata = &graph.getData(source).source_data_at(source);
+  sdata->dist = 0;
+
+  heap.push(HNode(source, 0, sdata));
+
+  while(!heap.empty()) {
+    HNode j_data = heap.top();
+    heap.pop();
+
+    if (j_data.sdata->dist < j_data.dist) continue;
+
+    // If the min element removed from the heap is not fixed
+    if (!fixed[j_data.node]){
+      // fix the node
+      fixed[j_data.node] = true;
+      HNode z = j_data;
+
+      //go through the all the nodes in r_set
+      while(true) {
+	//explore the neighbours of z
+        for (auto e : edgeRange(z.node)) {
+          GNode k = graph.getEdgeDst(e);
+          if (fixed[k]) continue;
+
+          // If k node is not fixed, process the edge
+          auto& k_data = graph.getData(k).source_data_at(source);
+	  HNode khnode(k,k_data.dist,&k_data);
+
+          auto z_k_dist = graph.getEdgeData(e);
+	  //Fix the neighbour if his pred is 0
+          if (--k_data.pred <= 0) {
+            fixed[k] = true;
+            r_set->push_back(khnode);
+          }
+
+          if (k_data.dist > z.sdata->dist + z_k_dist) {
+            k_data.dist = z.sdata->dist + z_k_dist;
+            if (!fixed[k]) heap.push(HNode(k,k_data.dist,&k_data));
+          }
+        }
+
+        if (r_set->empty()) break;
+        z = r_set->back();
+        r_set->pop_back();
+      }
+    }
+  }
+}
+
+template <typename Graph,
+          typename T,
+          typename P,
+          typename R,
           typename Traits = GraphTraits<Graph>,
           typename Cmp = std::less<typename Traits::Dist>>
 void serSP2Algo(Graph& graph, const GNode& source,
@@ -1030,6 +1100,29 @@ void serSP2Algo(Graph& graph, const GNode& source,
     }
   }
 }
+
+template<typename Graph,
+         typename T = typename GraphTraits<Graph>::SSSP::UpdateRequest>
+class SerSP1AlgoRunner : public GraphAlgoBase<Graph, T> {
+ public:
+  using PushWrap = typename GraphTraits<Graph>::ReqPushWrap;
+  using EdgeRange = typename GraphTraits<Graph>::OutEdgeRangeFn;
+
+  SerSP1AlgoRunner() : graph(GraphAlgoBase<Graph, T>::graph), er({graph}) {}
+
+  virtual std::string name() {
+    std::string ret = "SerSP1";
+    return ret + (apsp ? "[APSP]" : "[SSSP]") + (prof ? "-prof" : "");
+  }
+
+  virtual void do_run(GNode source) {
+    serSP1Algo<Graph, T>(graph, source, pw, er);
+  }
+
+  Graph& graph;
+  PushWrap pw;
+  EdgeRange er;
+};
 
 
 template<typename Graph,
@@ -1235,6 +1328,21 @@ int main(int argc, char** argv) {
         run_benchmark(runner);
       } else if (apsp && !prof) {
         DijkstraAlgoRunner<SerialASGraph> runner;
+        run_benchmark(runner);
+      } else {
+        std::abort();
+      }
+      break;
+    }
+    case serSP1: {
+      if (!apsp && !prof) {
+        SerSP1AlgoRunner<SerialSSGraph> runner;
+        run_benchmark(runner);
+      } else if (!apsp && prof) {
+        SerSP1AlgoRunner<ProfilingGraph> runner;
+        run_benchmark(runner);
+      } else if (apsp && !prof) {
+        SerSP1AlgoRunner<SerialASGraph> runner;
         run_benchmark(runner);
       } else {
         std::abort();
