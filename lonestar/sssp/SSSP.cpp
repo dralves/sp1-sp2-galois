@@ -170,6 +170,10 @@ struct SerSourceData {
     pred = node_constants->total_pred;
     fixed = false;
   }
+
+  inline void fix(VertexContext context = VertexContext()){}
+  inline void visit(){}
+  inline void explore(VertexContext context = VertexContext()){}
 };
 
 
@@ -190,6 +194,10 @@ struct ParSourceData {
     pred = node_constants->total_pred;
     fixed = false;
   }
+
+  inline void fix(VertexContext context = VertexContext()){}
+  inline void visit(){}
+  inline void explore(VertexContext context = VertexContext()){}
 };
 
 template<typename SourceData,
@@ -213,14 +221,8 @@ struct NodeData {
   inline bool fixed(int index = 0) {
     return source_data_at(index).fixed;
   }
-
-  inline void fix(VertexContext context = VertexContext(), int index = 0) {
-    source_data_at(index).fixed = true;
-  }
-
-  inline void visit(int index = 0) {}
-  inline void explore(VertexContext context = VertexContext(), int index = 0) {}
 };
+
 
 template<typename SourceData>
 struct NodeData<SourceData, true> {
@@ -297,6 +299,22 @@ struct ProfilingSourceData {
   VertexContext ctx_explored;
   VertexContext ctx_fixed;
 
+  ProfilingSourceData()
+      : dist(DIST_INF),
+	pred(0),
+	fixed(false),
+	num_visits(0),
+	first_visit_usec(0),
+	first_visit_idx(0),
+	last_visit_usec(0),
+	visits_after_fixed(0),
+	visits_after_explored(0),
+	first_explored_usec(0),
+	first_explored_idx(0),
+	num_explores(0),
+	fixed_usec(0),
+	fixed_idx(0) {}
+
   void reset(bool reset_dist = true) {
     pred = node_constants->total_pred;
     if (reset_dist) dist = DIST_INF;
@@ -315,67 +333,84 @@ struct ProfilingSourceData {
     ctx_explored = VertexContext();
     ctx_fixed = VertexContext();
   }
+
+  inline void explore(VertexContext context = VertexContext()){
+    if (first_explored_usec == 0) {
+      num_explores++;
+      ctx_explored = context;
+      timestamp now = clock_type::now();
+      first_explored_usec = (now - profiling_start).count();
+      first_explored_idx = explored_nodes++;
+    }
+  }
+
+  inline void visit() {
+    if (num_visits == 0) {
+      timestamp now = clock_type::now();
+      first_visit_usec = (now - profiling_start).count();
+      first_visit_idx = visited_nodes++;
+    }
+    num_visits++;
+    if (num_explores > 0) {
+      visits_after_explored++;
+    }
+    if (fixed) {
+      timestamp now = clock_type::now();
+      visits_after_fixed++;
+      last_visit_usec = (now - profiling_start).count();
+    }
+  }
+  
+  inline void fix(VertexContext context = VertexContext()) {
+    if (fixed) return;
+    timestamp now = clock_type::now();
+    fixed = true;
+    fixed_usec = (now - profiling_start).count();
+    fixed_idx = fixed_nodes++;
+    ctx_fixed = context;
+  }
 };
 
 template<>
 struct NodeData<ProfilingSourceData, true> {
   int size;
   NodeConstants node_constants;
-  std::unique_ptr<ProfilingSourceData[]> source_data;
   typedef ProfilingSourceData SourceDataType;
+  SourceDataType source_data;
 
-  NodeData(int size_ = 1) : size(size_),
-                            source_data(new ProfilingSourceData[size]) {
+  NodeData(int size_ = 1) : size(size_) {
+    source_data.node_constants = &node_constants;
     reset();
   }
 
+  inline void reset(bool reset_dist = true) {
+    source_data.reset(reset_dist);
+  }
+
   ProfilingSourceData& source_data_at(int index) {
-    return source_data[index];
+    return source_data;
   }
+};
 
-  inline void explore(VertexContext context = VertexContext(), int index = 0) {
-    auto& source_data = source_data_at(index);
-    if (source_data.first_explored_usec == 0) {
-      source_data.num_explores++;
-      source_data.ctx_explored = context;
-      timestamp now = clock_type::now();
-      source_data.first_explored_usec = (now - profiling_start).count();
-      source_data.first_explored_idx = explored_nodes++;
-    }
-  }
+template<>
+struct NodeData<ProfilingSourceData, false> {
+  typedef ProfilingSourceData SourceDataType;
+  int size;
+  NodeConstants node_constants;
+  std::unique_ptr<ProfilingSourceData[]> source_data;
 
-  inline void fix(VertexContext context = VertexContext(), int index = 0) {
-    auto& source_data = source_data_at(index);
-    if (source_data.fixed) return;
-    timestamp now = clock_type::now();
-    source_data.fixed = true;
-    source_data.fixed_usec = (now - profiling_start).count();
-    source_data.fixed_idx = fixed_nodes++;
-    source_data.ctx_fixed = context;
-  }
-
-  inline void visit(int index = 0) {
-    auto& source_data = source_data_at(index);
-    if (source_data.num_visits == 0) {
-      timestamp now = clock_type::now();
-      source_data.first_visit_usec = (now - profiling_start).count();
-      source_data.first_visit_idx = visited_nodes++;
-    }
-    source_data.num_visits++;
-    if (source_data.num_explores > 0) {
-      source_data.visits_after_explored++;
-    }
-    if (source_data.fixed) {
-      timestamp now = clock_type::now();
-      source_data.visits_after_fixed++;
-      source_data.last_visit_usec = (now - profiling_start).count();
-    }
+  NodeData(int size_ = 1) : size(size_), source_data(new ProfilingSourceData[size]) {
+    reset();
   }
 
   inline void reset(bool reset_dist = true) {
     for (int i = 0; i < size; i++) {
       source_data[i].reset(reset_dist);
     }
+  }
+
+  ProfilingSourceData& source_data_at(int index) {
+    return source_data[index];
   }
 };
 
@@ -403,6 +438,12 @@ typedef typename galois::graphs::LC_CSR_Graph<NodeData<ProfilingSourceData, true
                                               uint32_t>
 ::with_no_lockable<true>
 ::type::with_numa_alloc<true>::type ProfilingGraph;
+
+typedef typename galois::graphs::LC_CSR_Graph<NodeData<ProfilingSourceData, false>,
+                                              uint32_t>
+::with_no_lockable<true>
+::type::with_numa_alloc<true>::type ProfilingASGraph;
+
 
 template<typename Graph>
 struct GraphTraits {
@@ -489,13 +530,12 @@ void calc_graph_predecessors(Graph& graph) {
 }
 
 template<typename Graph>
-void dump_profile(Graph& graph, std::ofstream& profile) {}
+void dump_profile(Graph& graph, std::ofstream& profile, uint32_t index) {}
 
 template<>
-void dump_profile<ProfilingGraph>(ProfilingGraph& graph, std::ofstream& profile) {
+void dump_profile<ProfilingGraph>(ProfilingGraph& graph, std::ofstream& profile, uint32_t index){
   for (auto& node : graph) {
-    // TODO support profiling beyond the first source
-    auto& d =  graph.getData(node).source_data_at(0);
+    auto& d =  graph.getData(node).source_data_at(index);
     if (d.dist == 2147483646) continue;
     profile << d.node_constants->node << ";" << d.pred << ";" << d.dist << ";" << d.fixed << ";" << d.node_constants->min_in_weight;
     profile << d.num_visits << ";" << d.first_visit_usec << ";" << d.first_visit_idx << ";";
@@ -538,7 +578,7 @@ class AlgoRunner {
     if (!prof) return true;
 
     std::string graph_name = removeExtension(basename(filename));
-    std::string prof_filename = "per_node_profile_" + name() + "_" + graph_name + ".csv";
+    std::string prof_filename = "per_node_profile_" + name() + "_" + graph_name + "_source_" + std::to_string(source) + ".csv";
     std::cout << "Outputting profile to file: " << prof_filename << std::endl;
 
     // For profiling graphs, output the metrics in csv form
@@ -547,9 +587,23 @@ class AlgoRunner {
     profile << "node_idx;pred;dist;fixed;min_in_weight;num_visits;first_visit_usec;first_visit_idx";
     profile << "last_visit_usec;visits_after_fixed;visits_after_explored;first_explored_usec;first_explored_idx;";
     profile << "num_explores;fixed_usec;fixed_idx;fixed_source;fixed_source_size;explored_source;explored_source_size;" << std::endl;
-    write_profile(profile, index);
+    write_profile(profile, this->source);
 
     profile.close();
+
+    if(apsp){
+      std::srand(std::time(0));
+      int random_node  = std::rand() % graph_size();
+      std::string prof_filename = "per_node_profile_" + name() + "_" + graph_name + "source_" + std::to_string(random_node) + ".csv";
+      std::cout << "Outputting profile to file: " << prof_filename << std::endl;
+      std::ofstream profile;
+      profile.open(prof_filename);
+      profile << "node_idx;pred;dist;fixed;min_in_weight;num_visits;first_visit_usec;first_visit_idx";
+      profile << "last_visit_usec;visits_after_fixed;visits_after_explored;first_explored_usec;first_explored_idx;";
+      profile << "num_explores;fixed_usec;fixed_idx;fixed_source;fixed_source_size;explored_source;explored_source_size;" << std::endl;
+      write_profile(profile, random_node);
+      profile.close();
+    }
 
     return true;
   }
@@ -592,6 +646,7 @@ class AlgoRunner {
   virtual bool do_verify() = 0;
   virtual void do_run(GNode source) = 0;
   virtual void do_run_apsp() = 0;
+  virtual uint32_t graph_size() = 0;
 
   GNode source;
   GNode report;
@@ -646,8 +701,12 @@ class GraphAlgoBase : public AlgoRunner<typename GraphTraits<Graph>::SSSP::Updat
     }
   }
 
+  virtual uint32_t graph_size() {
+    return graph.size();
+  }
+
   virtual void write_profile(std::ofstream& profile, uint32_t index) {
-    dump_profile(graph, profile);
+    dump_profile(graph, profile, index);
   }
 
   Graph graph;
@@ -840,11 +899,16 @@ void dijkstraAlgo(Graph& graph,
       continue;
     }
 
+    item_data.fix();
+    item_data.explore();
+
     for (auto e : edgeRange(item)) {
 
       GNode dst   = graph.getEdgeDst(e);
       auto& ddata = graph.getData(dst).source_data_at(source);
+      ddata.visit();
       auto& edata =  graph.getEdgeData(e);
+
 
       const auto newDist = item.dist + edata;
 
@@ -962,6 +1026,10 @@ void serSP1Algo(Graph& graph, const GNode& source,
     // If the min element removed from the heap is not fixed
     if (!fixed[j_data.node]){
       // fix the node
+
+      j_data.sdata->fix({VertexSource::HEAP, heap.size()});
+      j_data.sdata->explore({VertexSource::HEAP, heap.size()});
+
       fixed[j_data.node] = true;
       HNode z = j_data;
 
@@ -974,12 +1042,14 @@ void serSP1Algo(Graph& graph, const GNode& source,
 
           // If k node is not fixed, process the edge
           auto& k_data = graph.getData(k).source_data_at(source);
+          k_data.visit();
 	  HNode khnode(k,k_data.dist,&k_data);
 
           auto z_k_dist = graph.getEdgeData(e);
 	  //Fix the neighbour if his pred is 0
           if (--k_data.pred <= 0) {
             fixed[k] = true;
+            k_data.fix({VertexSource::R_SET, r_set->size()});
             r_set->push_back(khnode);
           }
 
@@ -1044,6 +1114,8 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
       heap.pop();
       min = node;
+      min.sdata->fix({VertexSource::HEAP, heap.size()});
+      min.sdata->explore({VertexSource::HEAP, heap.size()});
       fixed[min.node] = true;
       r_set->push_back(min);
     }
@@ -1066,6 +1138,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
 
         auto& kndata = graph.getData(knode);
         SourceData& k = kndata.source_data_at(source);
+        k.visit();
         HNode khnode(knode, k.dist, &k);
 
         // If k vertex is not fixed, process the edge between z and k.
@@ -1083,6 +1156,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         }
 
         if (--k.pred <= 0 || cmp(k.dist, (min.dist + kndata.node_constants.min_in_weight))) {
+          k.fix({VertexSource::R_SET, r_set->size()});
           fixed[knode] = true;
           r_set->push_back(khnode);
         } else if (changed) {
@@ -1094,6 +1168,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         // We're done, but before we break, let's just check whether we have the new min in the q set
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
+        min.sdata->fix({VertexSource::R_SET, r_set->size()});
         fixed[min.node] = true;
         r_set->push_back(min);
       }
