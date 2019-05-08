@@ -76,6 +76,10 @@ case $i in
     threads="${i#*=}"
     shift
     ;;
+    -prof|--prof)
+    prof="-prof"
+    shift
+    ;;
     --default)
     DEFAULT=YES
     shift
@@ -100,236 +104,236 @@ then
   if [ ${testcase} = 'galois' ]
   then
     recompile 16384 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/rmat8-2e14.gr -algo ${algos} -t ${threads}   									 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/scalefree/rmat8-2e14.gr -algo ${algos} -t ${threads}  ${prof}   									 
     recompile 3353 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/structured/rome99.gr -algo ${algos} -t ${threads}   										
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/structured/rome99.gr -algo ${algos} -t ${threads}  ${prof}  										
     recompile 23947347 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road/USA-road-d.USA.gr -algo ${algos} -t ${threads}   										
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road/USA-road-d.USA.gr -algo ${algos} -t ${threads}  ${prof}  										
     recompile 8388608 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/random/r4-2e23.gr -algo ${algos} -t ${threads}   											
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/random/r4-2e23.gr -algo ${algos} -t ${threads}  ${prof}  											
     recompile 32 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/structured/torus5.gr -algo ${algos} -t ${threads}
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/structured/torus5.gr -algo ${algos} -t ${threads}  ${prof}
     #recompile 16777216 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/random/r4-2e24.gr -algo ${algos} -t ${threads}   											
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/random/r4-2e24.gr -algo ${algos} -t ${threads}  ${prof}  											
     #recompile 67108864 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/random/r4-2e26.gr -algo ${algos} -t ${threads}   											
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/random/r4-2e26.gr -algo ${algos} -t ${threads}  ${prof}  											
   fi
 
   if [ ${testcase} = 'small' ]
   then
     #recompile 500 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG2_rand.gr -algo ${algos} -t ${threads} 								      #164K 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG2_rand.gr -algo ${algos} -t ${threads} ${prof}						      #164K 
     #recompile 500 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG2.gr -algo ${algos} -t ${threads}                                                                      #164K 
-    #recompile 1000 ${threads}                                                                                                                                                     
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG3_rand.gr -algo ${algos} -t ${threads}                                                                     #168K 
-    #recompile 1000 ${threads}                                                                                                                                                     
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG3.gr -algo ${algos} -t ${threads}                                                                      #168K 
-    recompile 1998 ${threads}                                                                                                                                                      
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG1_rand.gr -algo ${algos} -t ${threads}                                                                      #408K 
-    recompile 1998 ${threads}                                                                                                                                                      
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG1.gr -algo ${algos} -t ${threads}                                                                       #408K 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG2.gr -algo ${algos} -t ${threads} ${prof}                                                      #164K 
+    #recompile 1000 ${threads}                                                                                                                                     
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG3_rand.gr -algo ${algos} -t ${threads}  ${prof}                                                    #168K 
+    #recompile 1000 ${threads}                                                                                                                                     
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG3.gr -algo ${algos} -t ${threads}  ${prof}                                                     #168K 
+    recompile 1998 ${threads}                                                                                                                                      
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG1_rand.gr -algo ${algos} -t ${threads}  ${prof}                                                     #408K 
+    recompile 1998 ${threads}                                                                                                                                      
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG1.gr -algo ${algos} -t ${threads}  ${prof}                                                      #408K 
     recompile 227321 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coAuthorsCiteseer_rand.gr -algo ${algos} -t ${threads}                                           #8.0M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coAuthorsCiteseer_rand.gr -algo ${algos} -t ${threads}  ${prof}                          #8.0M 
     recompile 227321 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coAuthorsCiteseer.gr -algo ${algos} -t ${threads}                                            #8.0M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coAuthorsCiteseer.gr -algo ${algos} -t ${threads}  ${prof}                           #8.0M 
     #recompile 299068 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coAuthorsDBLP_rand.gr -algo ${algos} -t ${threads}                                              #9.8M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coAuthorsDBLP_rand.gr -algo ${algos} -t ${threads}  ${prof}                             #9.8M 
     #recompile 299068 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coAuthorsDBLP.gr -algo ${algos} -t ${threads}                                               #9.8M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coAuthorsDBLP.gr -algo ${algos} -t ${threads}  ${prof}                              #9.8M 
     #recompile 268496 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/citationCiteseer_rand.gr -algo ${algos} -t ${threads}                                           # 11M  
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/citationCiteseer_rand.gr -algo ${algos} -t ${threads}   ${prof}                         # 11M  
     #recompile 268496 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/citationCiteseer.gr -algo ${algos} -t ${threads}                                            # 11M  
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/citationCiteseer.gr -algo ${algos} -t ${threads}   ${prof}                          # 11M  
     recompile 138614 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/random/Knowledge_Repo_rand.gr -algo ${algos} -t ${threads}                                                       # 12M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/random/Knowledge_Repo_rand.gr -algo ${algos} -t ${threads}   ${prof}                                     # 12M  
     recompile 138614 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/Knowledge_Repo.gr -algo ${algos} -t ${threads}                                                        # 12M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/Knowledge_Repo.gr -algo ${algos} -t ${threads}   ${prof}                                      # 12M  
     recompile 65537 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn16.gr -algo ${algos} -t ${threads}                                                  # 20M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn16.gr -algo ${algos} -t ${threads}    ${prof}                               # 20M
     recompile 65537 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn16.gr -algo ${algos} -t ${threads}                                           # 20M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn16.gr -algo ${algos} -t ${threads}   ${prof}                         # 20M
     recompile 1441296 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Belgium_rand.gr -algo ${algos} -t ${threads}                                                           # 23M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Belgium_rand.gr -algo ${algos} -t ${threads}   ${prof}                                         # 23M  
     recompile 1441296 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Belgium.gr -algo ${algos} -t ${threads}                                                            # 23M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Belgium.gr -algo ${algos} -t ${threads}   ${prof}                                          # 23M  
     #recompile 1971281 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/random/CA_RoadNet_rand.gr -algo ${algos} -t ${threads}                                                          # 58M  
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/random/CA_RoadNet_rand.gr -algo ${algos} -t ${threads}    ${prof}                                       # 58M  
     #recompile 1971281 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/CA_RoadNet.gr -algo ${algos} -t ${threads}                                                           # 58M  
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/CA_RoadNet.gr -algo ${algos} -t ${threads}   ${prof}                                         # 58M  
     recompile 174148 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s18-ef16_rand.gr -algo ${algos} -t ${threads}                                           # 60M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s18-ef16_rand.gr -algo ${algos} -t ${threads}  ${prof}                          # 60M  
     recompile 174148 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s18-ef16.gr -algo ${algos} -t ${threads}                                                    # 60M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s18-ef16.gr -algo ${algos} -t ${threads}  ${prof}                                   # 60M  
     recompile 1048577 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale20_rand.gr -algo ${algos} -t ${threads}                                                # 92M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale20_rand.gr -algo ${algos} -t ${threads}  ${prof}                               # 92M  
     recompile 1048577 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale20.gr -algo ${algos} -t ${threads}                                                 # 92M  
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale20.gr -algo ${algos} -t ${threads}  ${prof}                                # 92M  
   fi                                                                                                                                
 
 
   if [ ${testcase} = 'moderate' ]
   then                                                                                                                             
     recompile 6686494 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Italy_rand.gr -algo ${algos} -t ${threads}                                                             #105M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Italy_rand.gr -algo ${algos} -t ${threads}  ${prof}                                            #105M 
     recompile 6686494 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Italy.gr -algo ${algos} -t ${threads}                                                              #105M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Italy.gr -algo ${algos} -t ${threads}   ${prof}                                            #105M 
     recompile 2041302 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/random/Watson_Gene_rand.gr -algo ${algos} -t ${threads}                                                          #109M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/random/Watson_Gene_rand.gr -algo ${algos} -t ${threads}  ${prof}                                         #109M 
     recompile 2041302 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/Watson_Gene.gr -algo ${algos} -t ${threads}                                                           #109M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/graphBIG/unweighted/Watson_Gene.gr -algo ${algos} -t ${threads}  ${prof}                                          #109M 
     recompile 540487 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coPapersDBLP_rand.gr -algo ${algos} -t ${threads}                                                #121M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coPapersDBLP_rand.gr -algo ${algos} -t ${threads}  ${prof}                               #121M 
     recompile 540487 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coPapersDBLP.gr -algo ${algos} -t ${threads}                                                 #121M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coPapersDBLP.gr -algo ${algos} -t ${threads}  ${prof}                                #121M 
     recompile 335319 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s19-ef16_rand.gr -algo ${algos} -t ${threads}                                           #121M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s19-ef16_rand.gr -algo ${algos} -t ${threads}  ${prof}                          #121M 
     recompile 335319 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s19-ef16.gr -algo ${algos} -t ${threads}                                                    #121M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s19-ef16.gr -algo ${algos} -t ${threads}  ${prof}                                   #121M 
     #recompile 7733823 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Britain_rand.gr -algo ${algos} -t ${threads}                                                          #122M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Britain_rand.gr -algo ${algos} -t ${threads}  ${prof}                                         #122M 
     #recompile 7733823 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Britain.gr -algo ${algos} -t ${threads}                                                           #122M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Britain.gr -algo ${algos} -t ${threads}  ${prof}                                          #122M 
     #recompile 434103 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coPapersCiteseer_rand.gr -algo ${algos} -t ${threads}                                           #126M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/random/coPapersCiteseer_rand.gr -algo ${algos} -t ${threads}  ${prof}                          #126M 
     #recompile 434103 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coPapersCiteseer.gr -algo ${algos} -t ${threads}                                            #126M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/citation_networks/unweighted/coPapersCiteseer.gr -algo ${algos} -t ${threads}  ${prof}                           #126M 
     recompile 524288 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn19.gr -algo ${algos} -t ${threads}                                                  #171M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-logn19.gr -algo ${algos} -t ${threads}  ${prof}                                 #171M
     recompile 524288 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn19.gr -algo ${algos} -t ${threads}                                           #171M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_graph500/kron_g500-simple-logn19.gr -algo ${algos} -t ${threads}  ${prof}                          #171M
     #recompile 11950758 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Asia_rand.gr -algo ${algos} -t ${threads}                                                             #189M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/random/Asia_rand.gr -algo ${algos} -t ${threads}  ${prof}                                            #189M 
     #recompile 11950758 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Asia.gr -algo ${algos} -t ${threads}                                                              #189M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/road_graphs/unweighted/Asia.gr -algo ${algos} -t ${threads}  ${prof}                                             #189M 
     recompile 2097153 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale21_rand.gr -algo ${algos} -t ${threads}                                                #191M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale21_rand.gr -algo ${algos} -t ${threads}  ${prof}                               #191M 
     recompile 2097153 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale21.gr -algo ${algos} -t ${threads}                                                 #191M 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale21.gr -algo ${algos} -t ${threads}  ${prof}                                #191M 
     #recompile 645821 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s20-ef16_rand.gr -algo ${algos} -t ${threads}                                          #245M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s20-ef16_rand.gr -algo ${algos} -t ${threads}  ${prof}                         #245M 
     #recompile 645821 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s20-ef16.gr -algo ${algos} -t ${threads}                                                   #245M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s20-ef16.gr -algo ${algos} -t ${threads}  ${prof}                                  #245M 
     #recompile 4194305 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale22_rand.gr -algo ${algos} -t ${threads}                                               #399M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale22_rand.gr -algo ${algos} -t ${threads}   ${prof}                             #399M 
     #recompile 4194305 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale22.gr -algo ${algos} -t ${threads}                                                #399M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale22.gr -algo ${algos} -t ${threads}  ${prof}                               #399M 
     #recompile 1243073 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s21-ef16_rand.gr -algo ${algos} -t ${threads}                                          #494M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s21-ef16_rand.gr -algo ${algos} -t ${threads}  ${prof}                         #494M 
     #recompile 1243073 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s21-ef16.gr -algo ${algos} -t ${threads}                                                   #494M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s21-ef16.gr -algo ${algos} -t ${threads}  ${prof}                                  #494M 
     #recompile 8388609 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale23_rand.gr -algo ${algos} -t ${threads}                                               #830M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale23_rand.gr -algo ${algos} -t ${threads}  ${prof}                              #830M 
     #recompile 8388609 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale23.gr -algo ${algos} -t ${threads}                                                #830M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale23.gr -algo ${algos} -t ${threads}  ${prof}                               #830M 
     #recompile 2393286 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s22-ef16_rand.gr -algo ${algos} -t ${threads}                                          #997M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s22-ef16_rand.gr -algo ${algos} -t ${threads}  ${prof}                         #997M 
     #recompile 2393286 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s22-ef16.gr -algo ${algos} -t ${threads}                                                   #997M 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s22-ef16.gr -algo ${algos} -t ${threads}  ${prof}                                  #997M 
   fi
 
   if [ ${testcase} = 'large' ]                                                                                                                             
   then                                                                                                                             
     recompile 16777217 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale24_rand.gr -algo ${algos} -t ${threads}                                                #1.7G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/random/er-fact1.5-scale24_rand.gr -algo ${algos} -t ${threads}  ${prof}                                 #1.7G 
     recompile 16777217 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale24.gr -algo ${algos} -t ${threads}                                                 #1.7G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/erdos_renyi/unweighted/er-fact1.5-scale24.gr -algo ${algos} -t ${threads}   ${prof}                                 #1.7G 
     recompile 999996 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG1_ParMAT_rand.gr -algo ${algos} -t ${threads}                                                               #1.9G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG1_ParMAT_rand.gr -algo ${algos} -t ${threads}   ${prof}                                               #1.9G 
     #recompile 1999993 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG2_ParMAT_rand.gr -algo ${algos} -t ${threads}                                                              #1.9G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG2_ParMAT_rand.gr -algo ${algos} -t ${threads}   ${prof}                                              #1.9G 
     recompile 999996 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG1_ParMAT.gr -algo ${algos} -t ${threads}#1.9G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG1_ParMAT.gr -algo ${algos} -t ${threads}	 ${prof}			 			#1.9G 
     #recompile 1999993 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG2_ParMAT.gr -algo ${algos} -t ${threads}                                                               #1.9G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG2_ParMAT.gr -algo ${algos} -t ${threads}  ${prof}                                                #1.9G 
     recompile 99999837 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/random/ParMAT_100M_160M_rand.gr -algo ${algos} -t ${threads}                                                       #2.0G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/random/ParMAT_100M_160M_rand.gr -algo ${algos} -t ${threads}  ${prof}                                        #2.0G 
     recompile 99999837 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/unweighted/ParMAT_100M_160M.gr -algo ${algos} -t ${threads}                                                        #2.0G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/unweighted/ParMAT_100M_160M.gr -algo ${algos} -t ${threads}  ${prof}                                         #2.0G 
     recompile 4606315 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s23-ef16_rand.gr -algo ${algos} -t ${threads}                                           #2.0G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-s23-ef16_rand.gr -algo ${algos} -t ${threads}  ${prof}                            #2.0G 
     recompile 4606315 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s23-ef16.gr -algo ${algos} -t ${threads}                                                    #2.0G 
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-s23-ef16.gr -algo ${algos} -t ${threads}  ${prof}                                     #2.0G 
     #recompile 1999985 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG3_ParMAT_rand.gr -algo ${algos} -t ${threads}                                                              #2.3G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/random/DAG3_ParMAT_rand.gr -algo ${algos} -t ${threads}  ${prof}                                               #2.3G 
     #recompile 1999985 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG3_ParMAT.gr -algo ${algos} -t ${threads}                                                               #2.3G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/DAG/unweighted/DAG3_ParMAT.gr -algo ${algos} -t ${threads}  ${prof}                                                #2.3G 
     #recompile 149999446 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/random/ParMAT_150M_160M_rand.gr -algo ${algos} -t ${threads}                                                      #2.8G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/random/ParMAT_150M_160M_rand.gr -algo ${algos} -t ${threads}  ${prof}                                       #2.8G 
     #recompile 149999446 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/unweighted/ParMAT_150M_160M.gr -algo ${algos} -t ${threads}                                                       #2.8G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/PARMAT/unweighted/ParMAT_150M_160M.gr -algo ${algos} -t ${threads}  ${prof}                                        #2.8G 
     #recompile 8860451 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-scale24-ef16_adj_rand.gr -algo ${algos} -t ${threads}                                  #4.0G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-scale24-ef16_adj_rand.gr -algo ${algos} -t ${threads}  ${prof}                   #4.0G 
     #recompile 8860451 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-scale24-ef16_adj.gr -algo ${algos} -t ${threads}                                           #4.0G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-scale24-ef16_adj.gr -algo ${algos} -t ${threads}  ${prof}                            #4.0G 
     #recompile 17043781 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-scale25-ef16_adj_rand.gr -algo ${algos} -t ${threads}                                  #8.0G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/random_weights/graph500-scale25-ef16_adj_rand.gr -algo ${algos} -t ${threads}  ${prof}                   #8.0G 
     #recompile 17043781 ${threads}
-    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-scale25-ef16_adj.gr -algo ${algos} -t ${threads}                                           #8.0G 
+    #${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/unweighted/graph500-scale25-ef16_adj.gr -algo ${algos} -t ${threads}  ${prof}                            #8.0G 
   fi
 
   if [ ${testcase} = 'kron-small' ]
   then
     recompile 16365 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e14.gr -algo ${algos} -t ${threads}  #372K
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e14.gr -algo ${algos} -t ${threads}  ${prof}  							#372K
     recompile 16365 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e14-rnd.gr -algo ${algos} -t ${threads}                                                       #372K
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e14-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #372K
     recompile 32753 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e15.gr -algo ${algos} -t ${threads}  #792K
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e15.gr -algo ${algos} -t ${threads}  ${prof} 							#792K
     recompile 32753 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e15-rnd.gr -algo ${algos} -t ${threads}                                                       #792K
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e15-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #792K
     recompile 65523 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e16.gr -algo ${algos} -t ${threads}  #1.7M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e16.gr -algo ${algos} -t ${threads}  ${prof} 							#1.7M
     recompile 65523 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e16-rnd.gr -algo ${algos} -t ${threads}                                                       #1.7M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e16-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #1.7M
     recompile 131051 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e17.gr -algo ${algos} -t ${threads}  #3.6M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e17.gr -algo ${algos} -t ${threads}  ${prof} 							#3.6M
     recompile 131051 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e17-rnd.gr -algo ${algos} -t ${threads}                                                       #3.6M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e17-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #3.6M
     recompile 262082 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e18.gr -algo ${algos} -t ${threads}  #7.6M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e18.gr -algo ${algos} -t ${threads}  ${prof} 							#7.6M
     recompile 262082 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e18-rnd.gr -algo ${algos} -t ${threads}                                                       #7.6M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e18-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #7.6M
     recompile 524273 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e19.gr -algo ${algos} -t ${threads}  #17M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e19.gr -algo ${algos} -t ${threads}  ${prof} 							#17M
     recompile 524273 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e19-rnd.gr -algo ${algos} -t ${threads}                                                       #17M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e19-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #17M
   fi
 
   if [ ${testcase} = 'kron-moderate' ]
   then
     recompile 1048515 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e20.gr -algo ${algos} -t ${threads}  #35M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e20.gr -algo ${algos} -t ${threads}  ${prof} 							#35M
     recompile 1048515 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e20-rnd.gr -algo ${algos} -t ${threads}                                                       #35M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e20-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #35M
     recompile 2097081 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e21.gr -algo ${algos} -t ${threads}  #76M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e21.gr -algo ${algos} -t ${threads}  ${prof} 							#76M
     recompile 2097081 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e21-rnd.gr -algo ${algos} -t ${threads}                                                       #76M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e21-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #76M
     recompile 4194194 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e22.gr -algo ${algos} -t ${threads}  #163M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e22.gr -algo ${algos} -t ${threads}  ${prof} 							#163M
     recompile 4194194 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e22-rnd.gr -algo ${algos} -t ${threads}                                                       #163M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e22-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #163M
     recompile 8388497 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e23.gr -algo ${algos} -t ${threads}  #351M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e23.gr -algo ${algos} -t ${threads}   ${prof}						i       #351M
     recompile 8388497 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e23-rnd.gr -algo ${algos} -t ${threads}                                                       #351M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e23-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #351M
     recompile 16777101 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e24.gr -algo ${algos} -t ${threads}  #759M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e24.gr -algo ${algos} -t ${threads}  ${prof} 							#759M
     recompile 16777101 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e24-rnd.gr -algo ${algos} -t ${threads}                                                       #759M
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e24-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #759M
   fi
 
   if [ ${testcase} = 'kron-large' ]
   then
     recompile 33554313 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e25.gr -algo ${algos} -t ${threads}  #1.7G
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e25.gr -algo ${algos} -t ${threads}  ${prof} 							#1.7G
     recompile 33554313 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e25-rnd.gr -algo ${algos} -t ${threads}                                                       #1.7G
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e25-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #1.7G
     recompile 67108631 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e26.gr -algo ${algos} -t ${threads}  #3.5G
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron/kron-2e26.gr -algo ${algos} -t ${threads}  ${prof}						        #3.5G
     recompile 67108631 ${threads}
-    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e26-rnd.gr -algo ${algos} -t ${threads}                                                       #3.5G
+    ${path}/sssp /work/05888/madansk/stampede2/input_graphs/power_law/kron_random/kron-2e26-rnd.gr -algo ${algos} -t ${threads}  ${prof}                                        #3.5G
   fi
 fi
 

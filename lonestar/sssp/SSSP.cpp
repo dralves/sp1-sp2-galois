@@ -1362,11 +1362,13 @@ void run_benchmark(AlgoRunner& runner) {
 
   // Main bench run.
   runner.run("main");
-  runner.verify();
 
   // Reset everything but the distances for a final baseline run.
-  //runner.reset(false);
-  //runner.run("baseline");
+  if(prof){
+    runner.reset(false);
+    runner.run("baseline");
+  }
+  runner.verify();
 }
 
 
