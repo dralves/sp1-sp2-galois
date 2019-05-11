@@ -537,13 +537,13 @@ void dump_profile<ProfilingGraph>(ProfilingGraph& graph, std::ofstream& profile,
   for (auto& node : graph) {
     auto& d =  graph.getData(node).source_data_at(index);
     if (d.dist == 2147483646) continue;
-    profile << d.node_constants->node << ";" << d.pred << ";" << d.dist << ";" << d.fixed << ";" << d.node_constants->min_in_weight;
+    profile << d.node_constants->node << ";" << d.pred << ";" << d.dist << ";" << d.fixed << ";" << d.node_constants->min_in_weight << ";";
     profile << d.num_visits << ";" << d.first_visit_usec << ";" << d.first_visit_idx << ";";
     profile << d.last_visit_usec << ";" << d.visits_after_fixed << ";" << d.visits_after_explored << ";";
     profile << d.first_explored_usec << ";" << d.first_explored_idx << ";";
     profile << d.num_explores << ";" << d.fixed_usec << ";" << d.fixed_idx << ";";
     profile << d.ctx_fixed.vertex_source << ";" << d.ctx_fixed.set_size << ";";
-    profile << d.ctx_explored.vertex_source << ";" << d.ctx_explored.set_size << std::endl;
+    profile << d.ctx_explored.vertex_source << ";" << d.ctx_explored.set_size << ";" << std::endl;
   }
 }
 
@@ -558,7 +558,7 @@ class AlgoRunner {
   virtual void write_profile(std::ofstream& profile, uint32_t index) = 0;
 
 
-  virtual bool verify(uint32_t index = 0) {
+  virtual bool verify(std::string run_name, uint32_t index = 0) {
     galois::reportPageAlloc("MeminfoPost");
 
     std::cout << "Node " << reportNode << " has distance "
@@ -578,13 +578,13 @@ class AlgoRunner {
     if (!prof) return true;
 
     std::string graph_name = removeExtension(basename(filename));
-    std::string prof_filename = "per_node_profile_" + name() + "_" + graph_name + "_source_" + std::to_string(source) + ".csv";
+    std::string prof_filename = "per_node_profile_" + name() + "_"+ run_name + "_" + graph_name + "_source_" + std::to_string(source) + ".csv";
     std::cout << "Outputting profile to file: " << prof_filename << std::endl;
 
     // For profiling graphs, output the metrics in csv form
     std::ofstream profile;
     profile.open(prof_filename);
-    profile << "node_idx;pred;dist;fixed;min_in_weight;num_visits;first_visit_usec;first_visit_idx";
+    profile << "node_idx;pred;dist;fixed;min_in_weight;num_visits;first_visit_usec;first_visit_idx;";
     profile << "last_visit_usec;visits_after_fixed;visits_after_explored;first_explored_usec;first_explored_idx;";
     profile << "num_explores;fixed_usec;fixed_idx;fixed_source;fixed_source_size;explored_source;explored_source_size;" << std::endl;
     write_profile(profile, this->source);
@@ -1362,13 +1362,14 @@ void run_benchmark(AlgoRunner& runner) {
 
   // Main bench run.
   runner.run("main");
+  runner.verify("main");
 
   // Reset everything but the distances for a final baseline run.
   if(prof){
     runner.reset(false);
     runner.run("baseline");
   }
-  runner.verify();
+  //runner.verify("profile");
 }
 
 
