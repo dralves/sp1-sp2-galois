@@ -33,7 +33,8 @@
 # Other commands must follow all #SBATCH directives...
 
 module load boost
-module load intel/18.0.2
+#module load intel/18.0.2
+module load gcc/7.1.0
 
 # Launch serial code...
 
