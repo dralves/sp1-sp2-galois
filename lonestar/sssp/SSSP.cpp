@@ -17,6 +17,15 @@
  * Documentation, or loss or inaccuracy of data of any kind.
  */
 
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/count.hpp>
+#include <boost/accumulators/statistics/mean.hpp>
+#include <boost/accumulators/statistics/max.hpp>
+#include <boost/accumulators/statistics/min.hpp>
+#include <boost/accumulators/statistics/median.hpp>
+#include <boost/accumulators/statistics/variance.hpp>
+
 #include "galois/Galois.h"
 #include "galois/AtomicHelpers.h"
 #include "galois/FlatMap.h"
@@ -33,6 +42,8 @@
 #include "Lonestar/BFS_SSSP.h"
 
 #include <iostream>
+#include <chrono>
+#include <iomanip>
 #include <unordered_set>
 #include <fstream>
 #include "stack_vector.h"
@@ -43,7 +54,8 @@
 #endif
 
 namespace cll = llvm::cl;
-
+using namespace std::chrono; 
+namespace acc = boost::accumulators;
 
 static const char* name = "Single Source Shortest Path";
 static const char* desc =
@@ -108,12 +120,15 @@ constexpr static const bool TRACK_WORK          = false;
 constexpr static const unsigned CHUNK_SIZE      = 64u;
 constexpr static const ptrdiff_t EDGE_TILE_SIZE = 512;
 
+high_resolution_clock::time_point start;
+
 template<typename GraphTypes>
 struct SerNodeData {
   typename GraphTypes::SerGraphType::GraphNode node;
   int pred;
   uint32_t dist;
   bool fixed;
+  high_resolution_clock::time_point fixed_ts;
   uint32_t min_in_weight;
   SerNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
 };
@@ -124,6 +139,7 @@ struct ParNodeData {
   std::atomic<int> pred;
   std::atomic<uint32_t> dist;
   std::atomic<bool> fixed;
+  high_resolution_clock::time_point fixed_ts;
   uint32_t min_in_weight;
   ParNodeData(): node(-1), pred(0), dist(0), fixed(false) {}
 };
@@ -220,6 +236,9 @@ void deltaStepAlgo(Graph& graph,
                          if (ddist.dist.compare_exchange_weak(
                                  oldDist, newDist, std::memory_order_relaxed)) {
 
+                           ddist.fixed = true;
+                           ddist.fixed_ts = high_resolution_clock::now();
+                           
                            if (TRACK_WORK) {
                              //! [per-thread contribution of self-defined stats]
                              if (oldDist != GType::Traits::SSSP::DIST_INFINITY) {
@@ -326,6 +345,10 @@ void dijkstraAlgo(Graph& graph, const GNode& source, const P& pushWrap,
       continue;
     }
 
+    auto& nd = graph.getData(item.src);
+    nd.fixed = true;
+    nd.fixed_ts = high_resolution_clock::now();
+
     for (auto e : edgeRange(item)) {
 
       GNode dst   = graph.getEdgeDst(e);
@@ -387,6 +410,7 @@ void serSP1Algo(Graph& graph, const GNode& source,
     if (!j_data.fixed) {
       // Set the element to fixed
       j_data.fixed = true;
+      j_data.fixed_ts = high_resolution_clock::now();
       GNode z = j.src;
 
       // Inner loop, go through the all the elements in R
@@ -402,6 +426,7 @@ void serSP1Algo(Graph& graph, const GNode& source,
             k_data.pred--;
             if (k_data.pred <= 0) {
               k_data.fixed = true;
+              k_data.fixed_ts = high_resolution_clock::now();
               r_set.push_back(k);
             }
 
@@ -473,6 +498,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
       heap.pop();
       min = item_data;
       min->fixed = true;
+      min->fixed_ts = high_resolution_clock::now();
       r_set.push_back(min);
 
       if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min->dist)) break;
@@ -499,6 +525,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         }
         if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
           k->fixed = true;
+          k->fixed_ts = high_resolution_clock::now();
           r_set.push_back(k);
         } else if (changed) {
           pushWrap(heap,k->node,k->dist);
@@ -510,6 +537,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
         // That is, if the heap is not empty and the current min is higher than the min in the q
         // set no point in pushing back to the heap, where it would have to bubble up.
         min->fixed = true;
+        min->fixed_ts = high_resolution_clock::now();
         r_set.push_back(min);
       }
     }
@@ -569,6 +597,7 @@ void parSP1Algo(Graph& graph,
     k_data.pred--;
     if (k_data.pred <= 0) {
       k_data.fixed = true;
+      k_data.fixed_ts = high_resolution_clock::now();
       push_back_edges_of_node(k, graph, ctx, edgeRange);
     }
 
@@ -615,6 +644,7 @@ void parSP1Algo(Graph& graph,
     if (!j_data.fixed) {
       // Set the element to fixed
       j_data.fixed = true;
+      j_data.fixed_ts = high_resolution_clock::now();
       galois::gstl::Vector<WorkItem> initial;
       push_back_edges_of_node(j.src, graph, initial, edgeRange);
       galois::for_each(galois::iterate(initial),
@@ -1057,6 +1087,26 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report) {
       GALOIS_DIE("Verification failed");
     }
   }
+
+  acc::accumulator_set<double, acc::stats<acc::tag::count,
+                                          acc::tag::mean,
+                                          acc::tag::variance,
+                                          acc::tag::max,
+                                          acc::tag::min,
+                                          acc::tag::median>> stats;
+
+  for (auto& node : graph) {
+    auto& node_data = graph.getData(node);
+    if (node_data.fixed) stats(duration_cast<microseconds>(node_data.fixed_ts - start).count());
+  }
+
+  std::cout << std::setprecision(16)
+            << "count:    " << acc::count(stats)    << '\n'
+            << "mean:     " << acc::mean(stats)     << '\n'
+            << "median:   " << acc::median(stats)   << '\n'
+            << "max:      " << acc::max(stats)      << '\n' 
+            << "min:      " << acc::min(stats)      << '\n'
+            << "variance: " << acc::variance(stats) << '\n';
 }
 
 int main(int argc, char** argv) {
@@ -1077,6 +1127,8 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
 
+      start = high_resolution_clock::now();
+      
       Tmain.start();
       deltaStepAlgo<ParGType, ParGType::Traits::SrcEdgeTile>(
           graph, source,
@@ -1091,6 +1143,8 @@ int main(int argc, char** argv) {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+
+      start = high_resolution_clock::now();
 
       Tmain.start();
       deltaStepAlgo<ParGType, ParGType::Traits::UpdateRequest>(
@@ -1107,6 +1161,8 @@ int main(int argc, char** argv) {
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
 
+      start = high_resolution_clock::now();
+      
       Tmain.start();
       serDeltaAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
           graph, source,
@@ -1122,6 +1178,8 @@ int main(int argc, char** argv) {
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
 
+      start = high_resolution_clock::now();
+      
       Tinit.start();
       serDeltaAlgo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
@@ -1131,6 +1189,7 @@ int main(int argc, char** argv) {
       Init_Time = Tinit.get();
 
       reset_graph<SerGType>(graph, source);
+      start = high_resolution_clock::now();
 
       Tmain.start();
       serDeltaAlgo<SerGType, SerGType::Traits::UpdateRequest>(
@@ -1148,6 +1207,8 @@ int main(int argc, char** argv) {
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
 
+      start = high_resolution_clock::now();
+
       Tmain.start();
       dijkstraAlgo<SerGType, SerGType::Traits::SrcEdgeTile>(
           graph, source,
@@ -1163,6 +1224,8 @@ int main(int argc, char** argv) {
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
 
+      start = high_resolution_clock::now();
+
       Tinit.start();
       dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
@@ -1172,6 +1235,7 @@ int main(int argc, char** argv) {
       Init_Time = Tinit.get();
 
       reset_graph<SerGType>(graph, source);
+      start = high_resolution_clock::now();
 
       Tmain.start();
       dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
@@ -1189,6 +1253,8 @@ int main(int argc, char** argv) {
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
 
+      start = high_resolution_clock::now();
+
       Tmain.start();
       topoAlgo<ParGType>(graph, source);
       Tmain.stop();
@@ -1200,6 +1266,8 @@ int main(int argc, char** argv) {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+
+      start = high_resolution_clock::now();
 
       Tmain.start();
       topoTileAlgo<ParGType>(graph, source);
@@ -1215,6 +1283,8 @@ int main(int argc, char** argv) {
       auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
       calc_graph_predecessors(graph, edgeRange);
 
+      start = high_resolution_clock::now();
+
       Tinit.start();
       serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
@@ -1224,6 +1294,7 @@ int main(int argc, char** argv) {
       Init_Time = Tinit.get();
 
       reset_graph<SerGType>(graph, source);
+      start = high_resolution_clock::now();
 
       Tmain.start();
       serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
@@ -1243,6 +1314,8 @@ int main(int argc, char** argv) {
       auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
       calc_graph_predecessors(graph, edgeRange);
 
+      start = high_resolution_clock::now();
+
       Tinit.start();
       serSP2Algo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
@@ -1252,6 +1325,7 @@ int main(int argc, char** argv) {
       Init_Time = Tinit.get();
 
       reset_graph<SerGType>(graph, source);
+      start = high_resolution_clock::now();
 
       Tmain.start();
       serSP2Algo<SerGType, SerGType::Traits::UpdateRequest>(
@@ -1288,6 +1362,8 @@ int main(int argc, char** argv) {
       auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
       calc_graph_predecessors(graph, edgeRange);
 
+      start = high_resolution_clock::now();      
+
       Tmain.start();
       parSP2VerticesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
           graph, source,
@@ -1304,6 +1380,8 @@ int main(int argc, char** argv) {
       init_graph<ParGType>(graph, source, report);
       auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
       calc_graph_predecessors(graph, edgeRange);
+
+      start = high_resolution_clock::now();      
 
       Tmain.start();
       parSP2EdgesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
