@@ -544,7 +544,6 @@ void serSP2Algo(Graph& graph, const GNode& source,
   }
 }
 
-
 template<typename GNode,
          typename Graph,
          typename Container,
@@ -682,11 +681,11 @@ void parSP2VerticesAlgo(Graph& graph,
 
   constexpr galois::MethodFlag flag = galois::MethodFlag::UNPROTECTED;
 
-
-
   Heap heap;
   std::atomic<uint32_t> last_heap_pop_dist(0);
   std::atomic<int> r_set_counter(1);
+
+  std::mutex mutex;
 
   galois::for_each(galois::iterate({T{source, 0}}),
                    [&](WorkItem z_item, auto& ctx) {
@@ -700,23 +699,24 @@ void parSP2VerticesAlgo(Graph& graph,
                        if (k_data.fixed) continue;
 
                        auto z_k_dist = graph.getEdgeData(z_edge, flag);
-                       Dist k_dist = k_data.dist;
-                       Dist new_k_dist = z_data.dist + z_k_dist;
                        bool changed = false;
 
-                       do {
-                         if (new_k_dist > k_dist) break;
-                         if (k_data.dist.compare_exchange_weak(k_dist, new_k_dist, std::memory_order_relaxed)) {
-                           k_dist = new_k_dist;
-                           changed = true;
-                         }
+                       unsigned int k_dist;
+                       while (true) {
                          k_dist = k_data.dist;
-                       } while(UNLIKELY(!changed));
+                         auto new_dist = z_data.dist + z_k_dist;
+                         if (new_dist < k_data.dist) {
+                           k_data.dist.compare_exchange_weak(k_dist, new_dist, std::memory_order_relaxed);
+                         } else {
+                           break;
+                         }
+                       }                      
 
                        // If the k vertex is now fixed, push the edges to the r set, otherwise push k
                        // to the heap.
                        if (--k_data.pred <= 0 || k_dist <= last_heap_pop_dist.load() + k_data.min_in_weight) {
                          k_data.fixed = true;
+                         k_data.fixed_ts = high_resolution_clock::now();
                          ++r_set_counter;
                          pushWrap(ctx, k, k_data.dist);
                        } else if (changed){
@@ -724,40 +724,30 @@ void parSP2VerticesAlgo(Graph& graph,
                        }
                      }
 
-                     uint32_t min_dist;
+                     
                      if (--r_set_counter == 0) {
 
+                       uint32_t min_dist = 0;
                        uint32_t items_pushed = 0;
-                       while(!heap.empty()) {
+                       while(!heap.empty() || r_set_counter > 0) {
                          auto j = heap.top();
                          auto& j_data = graph.getData(j.src, flag);
 
-                         if (j_data.dist < j.dist) {
+                         if (j_data.fixed || j_data.dist < j.dist) {
                            heap.pop();
+                           if (r_set_counter.load() > 0) break;
                            continue;
                          }
 
-                         if (j_data.fixed) {
-                           heap.pop();
-                           continue;
-                         }
+                         heap.pop();
+                         min_dist = j_data.dist;
+                         j_data.fixed = true;
+			 j_data.fixed_ts = high_resolution_clock::now();
+                         ++r_set_counter;
+                         items_pushed++;
+                         pushWrap(ctx, j.src, j.dist);
 
-                         if (items_pushed == 0) {
-                           j = heap.pop();
-                           last_heap_pop_dist = j.dist;
-                           j_data.fixed = true;
-                           min_dist = j_data.dist;
-                           items_pushed++;
-                           ++r_set_counter;
-                           pushWrap(ctx, j.src, j.dist);
-                         // Push all elements with the same weights
-                         } else if (j_data.dist == min_dist) {
-                           j = heap.pop();
-                           j_data.fixed = true;
-                           items_pushed++;
-                           ++r_set_counter;
-                           pushWrap(ctx, j.src, j.dist);
-                         } else break;
+                         if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min_dist)) break;
                        }
                      }
                    },
@@ -812,8 +802,10 @@ void parSP2EdgesAlgo(Graph& graph,
                        Dist new_k_dist = z_data.dist + z_item.dist;
                        bool changed = false;
 
+                       
+
                        while(new_k_dist < k_dist) {
-                         if (k_data.dist.compare_exchange_weak(k_dist, new_k_dist, std::memory_order_relaxed)) {
+                         if (k_data.dist.compare_exchange_weak(k_dist, new_k_dist, std::memory_order_seq_cst)) {
                            k_dist = new_k_dist;
                            changed = true;
                            break;
@@ -1100,13 +1092,36 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report) {
     if (node_data.fixed) stats(duration_cast<microseconds>(node_data.fixed_ts - start).count());
   }
 
+  auto count =  acc::count(stats);
+  auto mean =  acc::mean(stats);
+  auto median = acc::median(stats);
+  auto max =  acc::max(stats);
+  auto min = acc::min(stats);
+  auto variance =  acc::variance(stats);
+
   std::cout << std::setprecision(16)
-            << "count:    " << acc::count(stats)    << '\n'
-            << "mean:     " << acc::mean(stats)     << '\n'
-            << "median:   " << acc::median(stats)   << '\n'
-            << "max:      " << acc::max(stats)      << '\n' 
-            << "min:      " << acc::min(stats)      << '\n'
-            << "variance: " << acc::variance(stats) << '\n';
+            << "count:    " << count    << '\n'
+            << "mean:     " << mean     << '\n'
+            << "median:   " << median   << '\n'
+            << "max:      " << max      << '\n' 
+            << "min:      " << min      << '\n'
+            << "variance: " << variance << '\n';
+
+    //Auxiliary code for stat collection to CSV file
+  std::string resultfile_name = "results.csv";
+  std::string graph_name = removeExtension(basename(filename));
+  std::ifstream in_data_stream(resultfile_name);
+  bool print_header = false;
+  if(in_data_stream.peek() == std::ifstream::traits_type::eof())
+    print_header = true;
+  in_data_stream.close();
+  std::ofstream data_stream;
+  data_stream.open(resultfile_name, std::ofstream::out | std::ofstream::app);
+  if(print_header)
+    data_stream << "Algo;Graph_name;Main_time;Count;Mean;Median;max;min;variance";
+  data_stream << std::endl << ALGO_NAMES[algo] << ';' << graph_name << ';' << 0 << ';' << count << ';' << mean << ';' << median << ';' << max << ';' << min << ';' << variance << ';';  
+  data_stream.close();
+
 }
 
 int main(int argc, char** argv) {
@@ -1396,21 +1411,5 @@ int main(int argc, char** argv) {
     default:
       std::abort();
   }
-
-  //Auxiliary code for stat collection to CSV file
-  std::string resultfile_name = "results.csv";
-  std::string graph_name = removeExtension(basename(filename));
-  std::ifstream in_data_stream(resultfile_name);
-  bool print_header = false;
-  if(in_data_stream.peek() == std::ifstream::traits_type::eof())
-    print_header = true;
-  in_data_stream.close();
-  std::ofstream data_stream;
-  data_stream.open(resultfile_name, std::ofstream::out | std::ofstream::app);
-  if(print_header)
-    data_stream << "Algo;Graph_name;Init_Time;Main_Time";
-  data_stream << std::endl << ALGO_NAMES[algo] << ';' << graph_name << ';' << Init_Time << ';' << Main_Time;
-  data_stream.close();
-
   return 0;
 }
