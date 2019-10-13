@@ -472,6 +472,118 @@ void serSP1Algo(Graph& graph, const GNode& source,
   }
 }
 
+// template <typename GType,
+//           typename T,
+//           typename P,
+//           typename R,
+//           typename Graph = typename GType::Graph,
+//           typename GNode = typename GType::GNode,
+//           typename GNodeData = typename GType::Graph::node_data_type,
+//           typename Traits = typename GType::Traits,
+// 	  typename Cmp = std::less<typename Traits::Dist>>
+// void serSP2Algo(Graph& graph, const GNode& source,
+//                 const P& pushWrap, const R& edgeRange) {
+
+//   using Heap = galois::MinHeap<T>;
+//   using Dist = typename Traits::Dist;
+
+//   bool changed;
+
+//   Heap heap;
+//   pushWrap(heap, source, 0);
+
+//   galois::gstl::Vector<GNodeData*> r_set;
+//   r_set.reserve(100);
+
+//   GNodeData* min = nullptr;
+//   Cmp cmp;
+
+//   // While the heap is not empty
+//   while (!heap.empty() || !r_set.empty()) {
+
+//     while (LIKELY(!heap.empty())) {
+//       T item = heap.top();
+//       GNodeData* item_data = &graph.getData(item.src);
+
+//       if (item_data->fixed || item_data->dist < item.dist) {
+//         // If we got a min, go do some work.
+//         heap.pop();
+//         if (!r_set.empty()) break;
+//         continue;
+//       }
+//       heap.pop();
+//       min = item_data;
+//       min->fixed = true;
+//       min->fixed_ts = high_resolution_clock::now();
+//       r_set.push_back(min);
+
+//       if (heap.empty() || heap.top().dist != min->dist) break;
+//     }
+
+//     galois::gstl::Vector<GNodeData*> q_set1;
+//     galois::gstl::Vector<GNodeData*> q_set2;
+//     galois::gstl::Vector<GNodeData*>* q_set_current = &q_set1;
+//     galois::gstl::Vector<GNodeData*>* q_set_aux = &q_set2;
+//     // Inner loop, go through the all the elements in R
+//     while(r_set.size() > 0) {
+//       GNodeData* z = r_set.back();
+//       r_set.pop_back();
+
+//       // Get all the vertices that have edges from z
+//       for (auto e : edgeRange(z->node)) {
+//         auto k = &graph.getData(graph.getEdgeDst(e));
+//         Dist z_k_dist = graph.getEdgeData(e);
+//         // If k vertex is not fixed, process the edge between z and k.
+//         if (k->fixed) continue;
+
+
+//         changed = false;
+//         if(z->dist + z_k_dist < k->dist) {
+//           //std::cout << "Trying to relax to " <<  (z->dist + z_k_dist) << std::endl;
+//           k->dist = z->dist + z_k_dist;
+//           changed = true;
+//           if (k->dist < min->dist) min = k;
+//         }
+//         if (--k->pred == 0 || k->dist <= (min->dist + k->min_in_weight)) {         
+//           k->fixed = true;
+//           k->fixed_ts = high_resolution_clock::now();
+//           r_set.push_back(k);
+//         } else if (changed) {
+//           q_set_current->push_back(k);
+//         }
+//       }
+
+//       if (r_set.empty()) {        
+//         if (!min->fixed && min->dist <= heap.top().dist) {
+//           // We're done, but before we break, let's just check whether we have the new min in the q set
+//           // That is, if the heap is not empty and the current min is higher than the min in the q
+//           // set no point in pushing back to the heap, where it would have to bubble up.
+//           min->fixed = true;
+//           min->fixed_ts = high_resolution_clock::now();
+//           r_set.push_back(min);
+//         }
+//         for (auto& q : *q_set_current) {
+//           if (q->fixed) {
+//             r_set.push_back(q);
+//           } else {
+//             q_set_aux->push_back(q);
+//           }
+//         }
+//         if (r_set.empty()) {
+//           for (auto& q: *q_set_aux) {
+//             pushWrap(heap, q->node, q->dist);
+//           }
+//         } else {
+//           q_set_current->clear();
+//           auto temp =  q_set_current;
+//           q_set_current = q_set_aux;
+//           q_set_aux = temp;          
+//         }
+//       }
+//     }
+//   }
+// }
+
 template <typename GType,
           typename T,
           typename P,
@@ -505,20 +617,20 @@ void serSP2Algo(Graph& graph, const GNode& source,
       T item = heap.top();
       GNodeData* item_data = &graph.getData(item.src);
 
+       heap.pop();
       if (item_data->fixed || item_data->dist < item.dist) {
         // If we got a min, go do some work.
-        heap.pop();
         if (!r_set.empty()) break;
         continue;
       }
-      heap.pop();
       min = item_data;
       min->fixed = true;
       min->fixed_ts = high_resolution_clock::now();
       r_set.push_back(min);
 
-      if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min->dist)) break;
+      if (heap.empty() || heap.top().dist != min->dist) break;
     }
+
     // Inner loop, go through the all the elements in R
     while(r_set.size() > 0) {
       GNodeData* z = r_set.back();
@@ -529,14 +641,12 @@ void serSP2Algo(Graph& graph, const GNode& source,
       for (auto e : edgeRange(z->node)) {
         auto k = &graph.getData(graph.getEdgeDst(e));
         Dist z_k_dist = graph.getEdgeData(e);
-        //std::cout << "Processing edge " << *e << " from " << z->node << " to dst : " << k->node << " Current dist: " << k->dist << " New dist: " << (z->dist + z_k_dist) << std::endl;
         // If k vertex is not fixed, process the edge between z and k.
         if (k->fixed) continue;
 
 
         changed = false;
         if(z->dist + z_k_dist < k->dist) {
-          //std::cout << "Trying to relax to " <<  (z->dist + z_k_dist) << std::endl;
           k->dist = z->dist + z_k_dist;
           changed = true;
           if (k->dist < min->dist) min = k;
@@ -544,8 +654,6 @@ void serSP2Algo(Graph& graph, const GNode& source,
         if (--k->pred == 0 || k->dist <= (min->dist + k->min_in_weight)) {         
           k->fixed = true;
           k->fixed_ts = high_resolution_clock::now();
-          //std::cout << "Fixed " << k->node << " to " << k->dist << " at: " << duration_cast<microseconds>(k->fixed_ts - start).count() << std::endl;
-          //std::cout << "SP1 cond " << k->pred << " SP2 cond" << (min->dist + k->min_in_weight) << std::endl;
           r_set.push_back(k);
         } else if (changed) {
           pushWrap(heap,k->node,k->dist);
@@ -563,6 +671,7 @@ void serSP2Algo(Graph& graph, const GNode& source,
     }
   }
 }
+
 
 template<typename GNode,
          typename Graph,
@@ -707,13 +816,12 @@ void parSP2VerticesAlgo(Graph& graph,
   constexpr galois::MethodFlag flag = galois::MethodFlag::UNPROTECTED;
 
   Heap heap;
-  std::atomic<uint32_t> last_heap_pop_dist(0);
+  std::atomic<uint32_t> min_dist(0);
   std::atomic<int> r_set_counter(1);
   std::mutex mutex;
   auto& source_data = graph.getData(source);
   source_data.fixed = true;
   source_data.fixed_ts = high_resolution_clock::now();
-
 
   galois::for_each(galois::iterate({T{source, 0}}),
                    [&](WorkItem z_item, auto& ctx) {
@@ -732,7 +840,6 @@ void parSP2VerticesAlgo(Graph& graph,
                        auto new_dist = z_data.dist + z_k_dist;
                        unsigned int k_dist = k_data.dist;;
                        bool changed = false;
-
                        
                        while (new_dist < k_dist) {
                          //std::cout << "Trying to relax to " << new_dist << std::endl;
@@ -746,7 +853,8 @@ void parSP2VerticesAlgo(Graph& graph,
 
                        // If the k vertex is now fixed, push the edges to the r set, otherwise push k
                        // to the heap.
-                       if (--k_data.pred == 0 || k_dist <= last_heap_pop_dist.load() + k_data.min_in_weight) {
+                       --k_data.pred;
+                       if (k_dist <= min_dist + k_data.min_in_weight || k_data.pred <= 0) {
                          k_data.fixed = true;
                          k_data.fixed_ts = high_resolution_clock::now();                         
                          //std::cout << "Fixed " << k_data.node << " to " << k_data.dist << " at: " << duration_cast<microseconds>(k_data.fixed_ts - start).count() << std::endl;
@@ -760,29 +868,22 @@ void parSP2VerticesAlgo(Graph& graph,
 
                      
                      if (--r_set_counter == 0) {
-
-                       uint32_t min_dist = 0;
-                       uint32_t items_pushed = 0;
                        while(!heap.empty()) {
                          auto j = heap.top();
                          auto& j_data = graph.getData(j.src, flag);
-
+                         heap.pop();
                          if (j_data.fixed || j_data.dist < j.dist) {
-                           heap.pop();
                            if (r_set_counter.load() > 0) break;
                            continue;
                          }
 
-                         heap.pop();
-                         last_heap_pop_dist = (unsigned int)j_data.dist;
-                         min_dist = j_data.dist;
+                         min_dist = (unsigned int)j_data.dist;
                          j_data.fixed = true;
 			 j_data.fixed_ts = high_resolution_clock::now();
                          ++r_set_counter;
                          pushWrap(ctx, j.src, j.dist);
-                         items_pushed++;
 
-                         if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min_dist)) break;
+                         if (heap.empty() || heap.top().dist != min_dist) break;
                        }
                      }
                    },
@@ -1057,6 +1158,7 @@ int main(int argc, char** argv) {
   galois::SharedMemSys G;
   LonestarStart(argc, argv, name, desc, url);
 
+  skipVerify = true;
   std::cout << "Running " << ALGO_NAMES[algo] << " algorithm" << std::endl;
   galois::StatTimer Tinit;
   galois::StatTimer Tmain;
