@@ -91,13 +91,12 @@ enum Algo {
   serSP1,
   serSP2,
   parSP1,
-  parSP2V,
-  parSP2E
+  parSP2
 };
 
 const char* const ALGO_NAMES[] = {"deltaTile", "deltaStep",    "serDeltaTile",
                                   "serDelta",  "dijkstraTile", "dijkstra",
-                                  "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2V", "parSP2E"};
+                                  "topo", "topoTile", "serSP1", "serSP2", "parSP1", "parSP2"};
 
 static cll::opt<Algo>
     algo("algo", cll::desc("Choose an algorithm:"),
@@ -111,8 +110,7 @@ static cll::opt<Algo>
                      clEnumVal(serSP1, "serSP1"),
                      clEnumVal(serSP2, "serSP2"),
                      clEnumVal(parSP1, "parSP1"),
-                     clEnumVal(parSP2V, "parSP2V"),
-                     clEnumVal(parSP2E, "parSP2E"),
+                     clEnumVal(parSP2, "parSP2"),
                      clEnumValEnd),
          cll::init(deltaTile));
 
@@ -377,76 +375,6 @@ void calc_graph_predecessors(Graph& graph, R& edgeRange) {
   }
 }
 
-template <typename GType,
-          typename T,
-          typename P,
-          typename R,
-          typename Graph = typename GType::Graph,
-          typename GNode = typename GType::GNode,
-          typename Traits = typename GType::Traits>
-void serSP1Algo(Graph& graph, const GNode& source,
-                const P& pushWrap, const R& edgeRange) {
-
-  using Heap = galois::MinHeap<T>;
-
-  Heap heap;
-  pushWrap(heap, source, 0);
-
-  // The set of nodes which have been fixed but not explored
-  galois::gstl::Vector<GNode> r_set;
-
-  // While the heap is not empty
-  while (!heap.empty()) {
-    // Get the min element from the heap.
-    T j = heap.pop();
-
-    auto& j_data = graph.getData(j.src);
-
-    if (j_data.dist < j.dist) {
-      continue;
-    }
-
-    // If the min element is not fixed
-    if (!j_data.fixed) {
-      // Set the element to fixed
-      j_data.fixed = true;
-      j_data.fixed_ts = high_resolution_clock::now();
-      GNode z = j.src;
-
-      // Inner loop, go through the all the elements in R
-      while(true) {
-        auto& z_data = graph.getData(z);
-        // Get all the vertices that have edges from z
-        for (auto e : edgeRange(z)) {
-          GNode k = graph.getEdgeDst(e);
-          auto& k_data = graph.getData(k);
-          // If k vertex is not fixed, process the edge between z and k.
-          if (!k_data.fixed) {
-            auto z_k_dist = graph.getEdgeData(e);
-            k_data.pred--;
-            if (k_data.pred <= 0) {
-              k_data.fixed = true;
-              k_data.fixed_ts = high_resolution_clock::now();
-              r_set.push_back(k);
-            }
-
-            if (k_data.dist > z_data.dist + z_k_dist) {
-              k_data.dist = z_data.dist + z_k_dist;
-              if (!k_data.fixed) {
-                pushWrap(heap, k_data.node, k_data.dist);
-              }
-            }
-          }
-        }
-
-        if (r_set.empty()) break;
-        z = r_set.back();
-        r_set.pop_back();
-      }
-    }
-  }
-}
-
 #ifdef DEBUG
 #define D(x) x
 #else
@@ -465,7 +393,7 @@ template <typename GType,
           typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits,
 	  typename Cmp = std::less<typename Traits::Dist>>
-void serSP2Algo(Graph& graph, const GNode& source,
+void serSP1Algo(Graph& graph, const GNode& source,
                 const P& pushWrap, const R& edgeRange) {
 
   using Heap = galois::MinHeap<T>;
@@ -518,14 +446,106 @@ void serSP2Algo(Graph& graph, const GNode& source,
         Dist z_k_dist = graph.getEdgeData(e);
 
         changed = false;
-        if(cmp(z->dist + z_k_dist, k->dist)) {
+        if(z->dist + z_k_dist < k->dist) {
           k->dist = z->dist + z_k_dist;
           changed = true;
           if (k->dist < min->dist) min = k;
         }
-        if (--k->pred <= 0 || k->dist <= (min->dist + k->min_in_weight)) {
+        if (--k->pred <= 0) {
           k->fixed = true;
           k->fixed_ts = high_resolution_clock::now();
+          r_set.push_back(k);
+        } else if (changed) {
+          pushWrap(heap,k->node,k->dist);
+        }
+      }
+
+      if (r_set.empty() && !min->fixed && cmp(min->dist, heap.top().dist)){
+        // We're done, but before we break, let's just check whether we have the new min in the q set
+        // That is, if the heap is not empty and the current min is higher than the min in the q
+        // set no point in pushing back to the heap, where it would have to bubble up.
+        min->fixed = true;
+        min->fixed_ts = high_resolution_clock::now();
+        r_set.push_back(min);
+      }
+    }
+  }
+}
+
+template <typename GType,
+          typename T,
+          typename P,
+          typename R,
+          typename Graph = typename GType::Graph,
+          typename GNode = typename GType::GNode,
+          typename GNodeData = typename GType::Graph::node_data_type,
+          typename Traits = typename GType::Traits,
+	  typename Cmp = std::less<typename Traits::Dist>>
+void serSP2Algo(Graph& graph, const GNode& source,
+                const P& pushWrap, const R& edgeRange) {
+
+  using Heap = galois::MinHeap<T>;
+  using Dist = typename Traits::Dist;
+
+  bool changed;
+
+  Heap heap;
+  pushWrap(heap, source, 0);
+
+  galois::gstl::Vector<GNodeData*> r_set;
+  r_set.reserve(100);
+
+  GNodeData* min = nullptr;
+  Cmp cmp;
+
+  // While the heap is not empty
+  while (!heap.empty() || !r_set.empty()) {
+
+    while (LIKELY(!heap.empty())) {
+      T item = heap.top();
+      GNodeData* item_data = &graph.getData(item.src);
+
+      if (item_data->fixed || item_data->dist < item.dist) {
+        // If we got a min, go do some work.
+        heap.pop();
+        if (!r_set.empty()) break;
+        continue;
+      }
+      heap.pop();
+      min = item_data;
+      min->fixed = true;
+      min->fixed_ts = high_resolution_clock::now();
+      r_set.push_back(min);
+
+      if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min->dist)) break;
+    }
+    // Inner loop, go through the all the elements in R
+    while(r_set.size() > 0) {
+      GNodeData* z = r_set.back();
+      //std::cout << "Processing node " << z->node << std::endl;
+      r_set.pop_back();
+
+      // Get all the vertices that have edges from z
+      for (auto e : edgeRange(z->node)) {
+        auto k = &graph.getData(graph.getEdgeDst(e));
+        Dist z_k_dist = graph.getEdgeData(e);
+        //std::cout << "Processing edge " << *e << " from " << z->node << " to dst : " << k->node << " Current dist: " << k->dist << " New dist: " << (z->dist + z_k_dist) << std::endl;
+        // If k vertex is not fixed, process the edge between z and k.
+        if (k->fixed) continue;
+
+
+        changed = false;
+        if(z->dist + z_k_dist < k->dist) {
+          //std::cout << "Trying to relax to " <<  (z->dist + z_k_dist) << std::endl;
+          k->dist = z->dist + z_k_dist;
+          changed = true;
+          if (k->dist < min->dist) min = k;
+        }
+        if (--k->pred == 0 || k->dist <= (min->dist + k->min_in_weight)) {         
+          k->fixed = true;
+          k->fixed_ts = high_resolution_clock::now();
+          //std::cout << "Fixed " << k->node << " to " << k->dist << " at: " << duration_cast<microseconds>(k->fixed_ts - start).count() << std::endl;
+          //std::cout << "SP1 cond " << k->pred << " SP2 cond" << (min->dist + k->min_in_weight) << std::endl;
           r_set.push_back(k);
         } else if (changed) {
           pushWrap(heap,k->node,k->dist);
@@ -569,95 +589,100 @@ template <typename GType,
           typename GEdge = typename GType::Graph::edge_iterator::value_type,
           typename GNodeData = typename GType::Graph::node_data_type,
           typename Traits = typename GType::Traits>
-void parSP1Algo(Graph& graph,
-                const GNode& source,
-                const P& pushWrap,
-                const R& edgeRange) {
+void parSP1VerticesAlgo(Graph& graph,
+                        const GNode& source,
+                        const P& pushWrap,
+                        const R& edgeRange) {
 
   using Heap = galois::ThreadSafeMinHeap<T>;
-  using WorkItem = std::pair<GNode, GEdge>;
-  using PSchunk = galois::worklists::PerThreadChunkLIFO<CHUNK_SIZE>;
+  using WorkItem = T;
+  using PSchunk = galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>;
   using Dist = typename Traits::Dist;
 
   constexpr galois::MethodFlag flag = galois::MethodFlag::UNPROTECTED;
 
   Heap heap;
-  pushWrap(heap, source, 0, "parallel");
+  std::atomic<uint32_t> last_heap_pop_dist(0);
+  std::atomic<int> r_set_counter(1);
+  std::mutex mutex;
+  auto& source_data = graph.getData(source);
+  source_data.fixed = true;
+  source_data.fixed_ts = high_resolution_clock::now();
 
-  // A step in an unbundled r set which looks at a single edge
-  // from a node in the r_set.
-  auto r_set_edge_loop = [&](const WorkItem&  z_edge, auto& ctx) {
-    auto k = graph.getEdgeDst(z_edge.second);
-    auto& k_data = graph.getData(k, flag);
+  galois::for_each(galois::iterate({T{source, 0}}),
+                   [&](WorkItem z_item, auto& ctx) {
 
-    if (k_data.fixed) return;
+                     const auto& z_data = graph.getData(z_item.src, flag);
+                     //std::cout << "Processing node " << z_data.node << std::endl;
 
-    // If k vertex is not fixed, process the edge between z and k.
-    k_data.pred--;
-    if (k_data.pred <= 0) {
-      k_data.fixed = true;
-      k_data.fixed_ts = high_resolution_clock::now();
-      push_back_edges_of_node(k, graph, ctx, edgeRange);
-    }
+                     for (auto& z_edge : edgeRange(z_item.src)) {
+                       auto k = graph.getEdgeDst(z_edge);
+                       auto& k_data = graph.getData(k, flag);
 
-    // Note that if another thread reduces the distance in z
-    // while we're in the while loop the algorithm is still
-    // correct (if we change k because z is closer, then if
-    // z get even closer it's still valid to change k)
-    const auto& z_data = graph.getData(z_edge.first, flag);
-    auto z_k_dist = graph.getEdgeData(z_edge.second, flag);
-    Dist new_dist = z_data.dist + z_k_dist;
+                       //std::cout << "Processing edge " << *z_edge << " from " << z_item.src << " to dst : " << k_data.node << " Current dist: " << k_dist << " New dist: " << new_dist << std::endl;
+                       if (k_data.fixed) continue;
 
-    while (true) {
-      Dist old_dist = k_data.dist;
-      if (new_dist > old_dist) break;
+                       auto z_k_dist = graph.getEdgeData(z_edge, flag);
+                       auto new_dist = z_data.dist + z_k_dist;
+                       unsigned int k_dist = k_data.dist;;
+                       bool changed = false;
 
-      if (k_data.dist.compare_exchange_weak(old_dist, new_dist, std::memory_order_relaxed)) {
-        if (!k_data.fixed) pushWrap(heap, k_data.node, k_data.dist);
-        break;
-      }
-    }
-  };
+                       
+                       while (new_dist < k_dist) {
+                         //std::cout << "Trying to relax to " << new_dist << std::endl;
+                         if (k_data.dist.compare_exchange_weak(k_dist, new_dist, std::memory_order_relaxed)) {
+                           changed = true;
+                           break;
+                         }
+                         k_dist = k_data.dist;
+                         new_dist = z_data.dist + z_k_dist;                         
+                       }                      
 
+                       // If the k vertex is now fixed, push the edges to the r set, otherwise push k
+                       // to the heap.
+                       if (--k_data.pred == 0) {
+                         k_data.fixed = true;
+                         k_data.fixed_ts = high_resolution_clock::now();                         
+                         //std::cout << "Fixed " << k_data.node << " to " << k_data.dist << " at: " << duration_cast<microseconds>(k_data.fixed_ts - start).count() << std::endl;
+                         //std::cout << "SP1 cond " << k_data.pred << " SP2 cond" << (last_heap_pop_dist.load() + k_data.min_in_weight) << std::endl;
+                         pushWrap(ctx, k, k_data.dist);
+                         ++r_set_counter;
+                       } else if (changed){
+                         pushWrap(heap, k, k_data.dist);
+                       }
+                     }
 
-  size_t outer_iter = 0;
-  size_t duplicated_items = 0;
-  size_t average_heap_size = 0;
-  size_t heap_pushes = 0;
+                     
+                     if (--r_set_counter == 0) {
 
+                       uint32_t min_dist = 0;
+                       uint32_t items_pushed = 0;
+                       while(!heap.empty()) {
+                         auto j = heap.top();
+                         auto& j_data = graph.getData(j.src, flag);
 
-  // While the heap is not empty
-  while (!heap.empty()) {
-    // Get the min element from the heap.
-    T j = heap.pop();
-    outer_iter++;
-    average_heap_size += heap.size();
-    auto& j_data = graph.getData(j.src, flag);
+                         if (j_data.fixed || j_data.dist < j.dist) {
+                           heap.pop();
+                           if (r_set_counter.load() > 0) break;
+                           continue;
+                         }
 
-    if (j_data.dist < j.dist) {
-      duplicated_items++;
-      continue;
-    }
+                         heap.pop();
+                         last_heap_pop_dist = (unsigned int)j_data.dist;
+                         min_dist = j_data.dist;
+                         j_data.fixed = true;
+			 j_data.fixed_ts = high_resolution_clock::now();
+                         ++r_set_counter;
+                         pushWrap(ctx, j.src, j.dist);
+                         items_pushed++;
 
-    // If the min element is not fixed
-    if (!j_data.fixed) {
-      // Set the element to fixed
-      j_data.fixed = true;
-      j_data.fixed_ts = high_resolution_clock::now();
-      galois::gstl::Vector<WorkItem> initial;
-      push_back_edges_of_node(j.src, graph, initial, edgeRange);
-      galois::for_each(galois::iterate(initial),
-                       r_set_edge_loop,
-                       galois::wl<PSchunk>(),
-                       galois::no_conflicts(),
-                       galois::loopname("sssp_parsp1_inner"));
-    }
-  }
-
-  galois::runtime::reportStat_Single("SSSP-parSP1", "Outer loop iterations", outer_iter);
-  galois::runtime::reportStat_Single("SSSP-parSP1", "Heap pushes", heap_pushes);
-  galois::runtime::reportStat_Single("SSSP-parSP1", "Duplicated heap pushes", duplicated_items);
-  galois::runtime::reportStat_Single("SSSP-parSP1", "Average heap size", (average_heap_size * 1.0) / outer_iter);
+                         if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min_dist)) break;
+                       }
+                     }
+                   },
+                   galois::wl<PSchunk>(),
+                   galois::no_conflicts(),
+                   galois::loopname("sssp_parsp2_inner"));
 }
 
 template <typename GType,
@@ -684,39 +709,48 @@ void parSP2VerticesAlgo(Graph& graph,
   Heap heap;
   std::atomic<uint32_t> last_heap_pop_dist(0);
   std::atomic<int> r_set_counter(1);
-
   std::mutex mutex;
+  auto& source_data = graph.getData(source);
+  source_data.fixed = true;
+  source_data.fixed_ts = high_resolution_clock::now();
+
 
   galois::for_each(galois::iterate({T{source, 0}}),
                    [&](WorkItem z_item, auto& ctx) {
 
                      const auto& z_data = graph.getData(z_item.src, flag);
+                     //std::cout << "Processing node " << z_data.node << std::endl;
 
                      for (auto& z_edge : edgeRange(z_item.src)) {
                        auto k = graph.getEdgeDst(z_edge);
                        auto& k_data = graph.getData(k, flag);
 
+                       //std::cout << "Processing edge " << *z_edge << " from " << z_item.src << " to dst : " << k_data.node << " Current dist: " << k_dist << " New dist: " << new_dist << std::endl;
                        if (k_data.fixed) continue;
 
                        auto z_k_dist = graph.getEdgeData(z_edge, flag);
+                       auto new_dist = z_data.dist + z_k_dist;
+                       unsigned int k_dist = k_data.dist;;
                        bool changed = false;
 
-                       unsigned int k_dist;
-                       while (true) {
-                         k_dist = k_data.dist;
-                         auto new_dist = z_data.dist + z_k_dist;
-                         if (new_dist < k_data.dist) {
-                           k_data.dist.compare_exchange_weak(k_dist, new_dist, std::memory_order_relaxed);
-                         } else {
+                       
+                       while (new_dist < k_dist) {
+                         //std::cout << "Trying to relax to " << new_dist << std::endl;
+                         if (k_data.dist.compare_exchange_weak(k_dist, new_dist, std::memory_order_relaxed)) {
+                           changed = true;
                            break;
                          }
+                         k_dist = k_data.dist;
+                         new_dist = z_data.dist + z_k_dist;                         
                        }                      
 
                        // If the k vertex is now fixed, push the edges to the r set, otherwise push k
                        // to the heap.
-                       if (--k_data.pred <= 0 || k_dist <= last_heap_pop_dist.load() + k_data.min_in_weight) {
+                       if (--k_data.pred == 0 || k_dist <= last_heap_pop_dist.load() + k_data.min_in_weight) {
                          k_data.fixed = true;
-                         k_data.fixed_ts = high_resolution_clock::now();
+                         k_data.fixed_ts = high_resolution_clock::now();                         
+                         //std::cout << "Fixed " << k_data.node << " to " << k_data.dist << " at: " << duration_cast<microseconds>(k_data.fixed_ts - start).count() << std::endl;
+                         //std::cout << "SP1 cond " << k_data.pred << " SP2 cond" << (last_heap_pop_dist.load() + k_data.min_in_weight) << std::endl;
                          ++r_set_counter;
                          pushWrap(ctx, k, k_data.dist);
                        } else if (changed){
@@ -729,7 +763,7 @@ void parSP2VerticesAlgo(Graph& graph,
 
                        uint32_t min_dist = 0;
                        uint32_t items_pushed = 0;
-                       while(!heap.empty() || r_set_counter > 0) {
+                       while(!heap.empty()) {
                          auto j = heap.top();
                          auto& j_data = graph.getData(j.src, flag);
 
@@ -740,123 +774,15 @@ void parSP2VerticesAlgo(Graph& graph,
                          }
 
                          heap.pop();
+                         last_heap_pop_dist = (unsigned int)j_data.dist;
                          min_dist = j_data.dist;
                          j_data.fixed = true;
 			 j_data.fixed_ts = high_resolution_clock::now();
                          ++r_set_counter;
-                         items_pushed++;
                          pushWrap(ctx, j.src, j.dist);
+                         items_pushed++;
 
                          if (!(UNLIKELY(!heap.empty()) && heap.top().dist == min_dist)) break;
-                       }
-                     }
-                   },
-                   galois::wl<PSchunk>(),
-                   galois::no_conflicts(),
-                   galois::loopname("sssp_parsp2_inner"));
-}
-
-template <typename GType,
-          typename T,
-          typename P,
-          typename R,
-          typename Graph = typename GType::Graph,
-          typename GNode = typename GType::GNode,
-          typename GEdge = typename GType::Graph::edge_iterator::value_type,
-          typename GNodeData = typename GType::Graph::node_data_type,
-          typename Traits = typename GType::Traits>
-void parSP2EdgesAlgo(Graph& graph,
-                     const GNode& source,
-                     const P& pushWrap,
-                     const R& edgeRange) {
-
-  using Heap = galois::ThreadSafeMinHeap<T>;
-  using PSchunk = galois::worklists::PerSocketChunkFIFO<CHUNK_SIZE>;
-  using Dist = typename Traits::Dist;
-
-  constexpr galois::MethodFlag flag = galois::MethodFlag::UNPROTECTED;
-
-  struct WorkItem {
-    GNode src;
-    Dist dist;
-    GNode dst;
-  };
-
-  Heap heap;
-  std::atomic<uint32_t> last_heap_pop_dist(0);
-  std::atomic<int> r_set_counter(0);
-  std::vector<WorkItem> initial;
-  for (const auto& e: edgeRange(source)) {
-    ++r_set_counter;
-    initial.push_back(WorkItem{source, graph.getEdgeData(e), graph.getEdgeDst(e)});
-  }
-
-  galois::for_each(galois::iterate(initial),
-                   [&](WorkItem z_item, auto& ctx) {
-
-                     auto& k_data = graph.getData(z_item.dst, flag);
-
-                     if (!k_data.fixed) {
-                       const auto& z_data = graph.getData(z_item.src, flag);
-                       Dist k_dist = k_data.dist;
-                       Dist new_k_dist = z_data.dist + z_item.dist;
-                       bool changed = false;
-
-                       
-
-                       while(new_k_dist < k_dist) {
-                         if (k_data.dist.compare_exchange_weak(k_dist, new_k_dist, std::memory_order_seq_cst)) {
-                           k_dist = new_k_dist;
-                           changed = true;
-                           break;
-                         }
-                         k_dist = k_data.dist;
-                       }
-
-                       // If the k vertex is now fixed, push the edges to the r set, otherwise push k
-                       // to the heap.
-                       if (--k_data.pred <= 0 || k_dist <= last_heap_pop_dist.load() + k_data.min_in_weight) {
-                         k_data.fixed = true;
-                         for (auto& e: edgeRange(z_item.dst)) {
-                           ++r_set_counter;
-                           ctx.push_back(WorkItem{z_item.dst, graph.getEdgeData(e, flag), graph.getEdgeDst(e)});
-                         }
-                       } else if (changed){
-                         pushWrap(heap, z_item.dst, k_data.dist);
-                       }
-                     }
-
-                     uint32_t min_dist;
-                     if (--r_set_counter == 0) {
-                       bool pushed_item = false;
-                       while(!heap.empty()) {
-                         auto j = heap.top();
-                         auto& j_data = graph.getData(j.src, flag);
-
-                         if (j_data.fixed || j_data.dist < j.dist) {
-                           heap.pop();
-                           continue;
-                         }
-
-                         if (!pushed_item) {
-                           j = heap.pop();
-                           last_heap_pop_dist = j.dist;
-                           j_data.fixed = true;
-                           min_dist = j_data.dist;
-                           pushed_item = true;
-                           for (auto& e: edgeRange(j.src)) {
-                             ++r_set_counter;
-                             ctx.push_back(WorkItem{j.src, graph.getEdgeData(e, flag), graph.getEdgeDst(e)});
-                           }
-                         // Push all elements with the same weights
-                         } else if (j_data.dist == min_dist) {
-                           j = heap.pop();
-                           j_data.fixed = true;
-                           for (auto& e: edgeRange(j.src)) {
-                             ++r_set_counter;
-                             ctx.push_back(WorkItem{j.src, graph.getEdgeData(e, flag), graph.getEdgeDst(e)});
-                           }
-                         } else break;
                        }
                      }
                    },
@@ -1066,7 +992,7 @@ template <typename GType,
           typename Graph = typename GType::Graph,
           typename GNode = typename GType::GNode,
           typename Traits = typename GType::Traits>
-void verify_and_report(Graph& graph, GNode& source, GNode& report) {
+void verify_and_report(Graph& graph, GNode& source, GNode& report, unsigned long exec_time) {
   galois::reportPageAlloc("MeminfoPost");
 
   std::cout << "Node " << reportNode << " has distance "
@@ -1118,8 +1044,8 @@ void verify_and_report(Graph& graph, GNode& source, GNode& report) {
   std::ofstream data_stream;
   data_stream.open(resultfile_name, std::ofstream::out | std::ofstream::app);
   if(print_header)
-    data_stream << "Algo;Graph_name;Main_time;Count;Mean;Median;max;min;variance";
-  data_stream << std::endl << ALGO_NAMES[algo] << ';' << graph_name << ';' << 0 << ';' << count << ';' << mean << ';' << median << ';' << max << ';' << min << ';' << variance << ';';  
+    data_stream << "Algo;Graph_name;Main_time;Count;Mean;Median;max;min;variance;";
+  data_stream << std::endl << ALGO_NAMES[algo] << ';' << graph_name << ';' << exec_time << ';' << count << ';' << mean << ';' << median << ';' << max << ';' << min << ';' << variance; 
   data_stream.close();
 
 }
@@ -1141,6 +1067,8 @@ int main(int argc, char** argv) {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
       
@@ -1151,13 +1079,15 @@ int main(int argc, char** argv) {
           ParGType::Traits::TileRangeFn());
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, Tmain.get());
       break;
     }
     case deltaStep: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
 
@@ -1168,13 +1098,15 @@ int main(int argc, char** argv) {
           ParGType::Traits::OutEdgeRangeFn{graph});
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, Tmain.get());
       break;
     }
     case serDeltaTile: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
+      auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
       
@@ -1185,25 +1117,18 @@ int main(int argc, char** argv) {
           SerGType::Traits::TileRangeFn());
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, Tmain.get());
       break;
     }
     case serDelta: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
+      auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
       
-      Tinit.start();
-      serDeltaAlgo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          SerGType::Traits::OutEdgeRangeFn{graph});
-      Tinit.stop();
-      Init_Time = Tinit.get();
-
-      reset_graph<SerGType>(graph, source);
       start = high_resolution_clock::now();
 
       Tmain.start();
@@ -1212,15 +1137,16 @@ int main(int argc, char** argv) {
           SerGType::Traits::ReqPushWrap(),
           SerGType::Traits::OutEdgeRangeFn{graph});
       Tmain.stop();
-      Main_Time = Tmain.get();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, Tmain.get());
       break;
     }
     case dijkstraTile: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
+      auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
 
@@ -1231,25 +1157,16 @@ int main(int argc, char** argv) {
           SerGType::Traits::TileRangeFn());
       Tmain.stop();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, Tmain.get());
       break;
     }
     case dijkstra: {
       SerGType::Graph graph;
       SerGType::GNode source, report;
       init_graph<SerGType>(graph, source, report);
+      auto edgeRange = SerGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
-      start = high_resolution_clock::now();
-
-      Tinit.start();
-      dijkstraAlgo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          SerGType::Traits::OutEdgeRangeFn{graph});
-      Tinit.stop();
-      Init_Time = Tinit.get();
-
-      reset_graph<SerGType>(graph, source);
       start = high_resolution_clock::now();
 
       Tmain.start();
@@ -1258,15 +1175,16 @@ int main(int argc, char** argv) {
           SerGType::Traits::ReqPushWrap(),
           SerGType::Traits::OutEdgeRangeFn{graph});
       Tmain.stop();
-      Main_Time = Tmain.get();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, Tmain.get());
       break;
     }
     case topo: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
 
@@ -1274,13 +1192,15 @@ int main(int argc, char** argv) {
       topoAlgo<ParGType>(graph, source);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, Tmain.get());
       break;
     }
     case topoTile: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
+      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
+      calc_graph_predecessors(graph, edgeRange);
 
       start = high_resolution_clock::now();
 
@@ -1288,7 +1208,7 @@ int main(int argc, char** argv) {
       topoTileAlgo<ParGType>(graph, source);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, Tmain.get());
       break;
     }
     case serSP1: {
@@ -1300,26 +1220,14 @@ int main(int argc, char** argv) {
 
       start = high_resolution_clock::now();
 
-      Tinit.start();
-      serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tinit.stop();
-      Init_Time = Tinit.get();
-
-      reset_graph<SerGType>(graph, source);
-      start = high_resolution_clock::now();
-
       Tmain.start();
       serSP1Algo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
           SerGType::Traits::ReqPushWrap(),
           edgeRange);
       Tmain.stop();
-      Main_Time = Tmain.get();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, Tmain.get());
       break;
     }
     case serSP2: {
@@ -1331,26 +1239,14 @@ int main(int argc, char** argv) {
 
       start = high_resolution_clock::now();
 
-      Tinit.start();
-      serSP2Algo<SerGType, SerGType::Traits::UpdateRequest>(
-          graph, source,
-          SerGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tinit.stop();
-      Init_Time = Tinit.get();
-
-      reset_graph<SerGType>(graph, source);
-      start = high_resolution_clock::now();
-
       Tmain.start();
       serSP2Algo<SerGType, SerGType::Traits::UpdateRequest>(
           graph, source,
           SerGType::Traits::ReqPushWrap(),
           edgeRange);
       Tmain.stop();
-      Main_Time = Tmain.get();
 
-      verify_and_report<SerGType>(graph, source, report);
+      verify_and_report<SerGType>(graph, source, report, Tmain.get());
       break;
     }
     case parSP1: {
@@ -1360,17 +1256,19 @@ int main(int argc, char** argv) {
       auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
       calc_graph_predecessors(graph, edgeRange);
 
+      start = high_resolution_clock::now();      
+      
       Tmain.start();
-      parSP1Algo<ParGType, ParGType::Traits::UpdateRequest>(
+      parSP1VerticesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
           graph, source,
           ParGType::Traits::ReqPushWrap(),
           edgeRange);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
+      verify_and_report<ParGType>(graph, source, report, Tmain.get());
       break;
     }
-    case parSP2V: {
+    case parSP2: {
       ParGType::Graph graph;
       ParGType::GNode source, report;
       init_graph<ParGType>(graph, source, report);
@@ -1386,26 +1284,8 @@ int main(int argc, char** argv) {
           edgeRange);
       Tmain.stop();
 
-      verify_and_report<ParGType>(graph, source, report);
-      break;
-    }
-    case parSP2E: {
-      ParGType::Graph graph;
-      ParGType::GNode source, report;
-      init_graph<ParGType>(graph, source, report);
-      auto edgeRange = ParGType::Traits::OutEdgeRangeFn{graph};
-      calc_graph_predecessors(graph, edgeRange);
-
-      start = high_resolution_clock::now();      
-
-      Tmain.start();
-      parSP2EdgesAlgo<ParGType, ParGType::Traits::UpdateRequest>(
-          graph, source,
-          ParGType::Traits::ReqPushWrap(),
-          edgeRange);
-      Tmain.stop();
-
-      verify_and_report<ParGType>(graph, source, report);
+      //skipVerify = true;
+      verify_and_report<ParGType>(graph, source, report, Tmain.get());
       break;
     }
     default:
