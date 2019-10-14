@@ -672,7 +672,6 @@ void serSP2Algo(Graph& graph, const GNode& source,
   }
 }
 
-
 template<typename GNode,
          typename Graph,
          typename Container,
@@ -1020,6 +1019,7 @@ template <typename GType,
 void init_graph(Graph& graph, GNode& source, GNode& report) {
 
   using SSSP = typename Traits::SSSP;
+  using Dist = typename Traits::Dist;
   std::cout << "Reading from file: " << filename << std::endl;
   galois::graphs::readGraph(graph, filename);
   std::cout << "Read " << graph.size() << " nodes, " << graph.sizeEdges()
@@ -1055,12 +1055,24 @@ void init_graph(Graph& graph, GNode& source, GNode& report) {
         << "WARNING: Do not expect the default to be good for your graph.\n";
   }
 
+   auto edgeRange = typename GType::Traits::OutEdgeRangeFn{graph};
+
+   struct edgeComp {
+     bool operator()( const Dist& lhs, const Dist& rhs ) const {
+       return lhs < rhs;      
+     }
+   };
+
   galois::do_all(galois::iterate(graph),
-                 [&graph](GNode n) {
+                 [&](GNode n) {
                    auto& data = graph.getData(n);
                    data.dist = SSSP::DIST_INFINITY;
                    data.min_in_weight = SSSP::DIST_INFINITY;
                    data.node = n;
+                   //graph.sortEdgesByEdgeData(n, edgeComp());
+                   //                   for (auto& e : edgeRange(n)) {
+                   //  std::cout << "Node: " << n << " Edge: " << *e << " dist: " << graph.getEdgeData(e) << std::endl;
+                   //}
                  });
 
   graph.getData(source).dist = 0;
@@ -1158,7 +1170,7 @@ int main(int argc, char** argv) {
   galois::SharedMemSys G;
   LonestarStart(argc, argv, name, desc, url);
 
-  skipVerify = true;
+  //skipVerify = true;
   std::cout << "Running " << ALGO_NAMES[algo] << " algorithm" << std::endl;
   galois::StatTimer Tinit;
   galois::StatTimer Tmain;
